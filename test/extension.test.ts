@@ -69,25 +69,25 @@ test("S1: the extension registers exactly one command: wiz", () => {
 // ------------------------------------------------- parseWiz (pure, deterministic)
 
 test("S1: parseWiz maps every fixed form", () => {
-	assert.deepEqual(parseWiz("", ["escritorio"]), { kind: "status", name: undefined });
-	assert.deepEqual(parseWiz("   ", ["escritorio"]), { kind: "status", name: undefined });
+	assert.deepEqual(parseWiz("", ["escritorio"]), { kind: "menu", name: undefined });
+	assert.deepEqual(parseWiz("   ", ["escritorio"]), { kind: "menu", name: undefined });
 	assert.deepEqual(parseWiz("on", ["escritorio"]), { kind: "on", name: undefined });
 	assert.deepEqual(parseWiz("OFF", ["escritorio"]), { kind: "off", name: undefined });
-	assert.deepEqual(parseWiz("dim  40", ["escritorio"]), { kind: "dim", value: 40, name: undefined });
-	assert.deepEqual(parseWiz("TEMP 3200", ["escritorio"]), { kind: "temp", value: 3200, name: undefined });
-	assert.deepEqual(parseWiz("color #f80", ["escritorio"]), { kind: "color", value: "#f80", name: undefined });
-	assert.deepEqual(parseWiz("scene 6", ["escritorio"]), { kind: "scene", value: 6, name: undefined });
+	assert.deepEqual(parseWiz("  40 ", ["escritorio"]), { kind: "dim", value: 40, name: undefined });
+	assert.deepEqual(parseWiz("3200K", ["escritorio"]), { kind: "temp", value: 3200, name: undefined });
+	assert.deepEqual(parseWiz("#f80", ["escritorio"]), { kind: "color", value: "#f80", name: undefined });
+	assert.deepEqual(parseWiz("cozy", ["escritorio"]), { kind: "scene", value: 6, name: undefined });
 	assert.deepEqual(parseWiz("status", ["escritorio"]), { kind: "status", name: undefined });
 	assert.deepEqual(parseWiz("discover", ["escritorio"]), { kind: "discover" });
 	assert.deepEqual(parseWiz("help", ["escritorio"]), { kind: "help" });
 });
 
-test("S1: parseWiz targets a named light, with a bare name showing its state", () => {
-	assert.deepEqual(parseWiz("escritorio", ["escritorio", "cocina"]), { kind: "status", name: "escritorio" });
-	assert.deepEqual(parseWiz("  ESCRITORIO  ", ["escritorio", "cocina"]), { kind: "status", name: "escritorio" });
+test("S1: parseWiz targets a named light, with a bare name opening its menu", () => {
+	assert.deepEqual(parseWiz("escritorio", ["escritorio", "cocina"]), { kind: "menu", name: "escritorio" });
+	assert.deepEqual(parseWiz("  ESCRITORIO  ", ["escritorio", "cocina"]), { kind: "menu", name: "escritorio" });
 	assert.deepEqual(parseWiz("Cocina ON", ["escritorio", "cocina"]), { kind: "on", name: "cocina" });
-	assert.deepEqual(parseWiz("cocina  dim   40", ["escritorio", "cocina"]), { kind: "dim", value: 40, name: "cocina" });
-	assert.deepEqual(parseWiz("cocina color #ffcc00", ["escritorio", "cocina"]), {
+	assert.deepEqual(parseWiz("cocina   40", ["escritorio", "cocina"]), { kind: "dim", value: 40, name: "cocina" });
+	assert.deepEqual(parseWiz("cocina #ffcc00", ["escritorio", "cocina"]), {
 		kind: "color",
 		value: "#ffcc00",
 		name: "cocina",
@@ -97,15 +97,13 @@ test("S1: parseWiz targets a named light, with a bare name showing its state", (
 test("S1: parseWiz rejects unknown forms and malformed values, naming the valid range", () => {
 	for (const [args, pattern] of [
 		["bogus", /\/wiz 40/],
-		["dim abc", /whole number|needs a number/],
-		["dim 9", /10 to 100/],
-		["dim 101", /10 to 100/],
-		["temp 2199", /2200 to 6500/],
-		["temp 6501", /2200 to 6500/],
-		["scene 0", /1 to 32/],
-		["scene 33", /1 to 32/],
-		["color ff8800", /#rgb, #rrggbb or a name/],
-		["color #12345", /#rgb, #rrggbb or a name/],
+		["dim abc", /I don't understand/],
+		["9", /10 to 100/],
+		["101", /10 to 100/],
+		["2199k", /2200 to 6500/],
+		["6501k", /2200 to 6500/],
+		["ff8800", /I don't understand/],
+		["#12345", /I don't understand/],
 		["nope dim 40", /\/wiz 40/],
 		["escritorio bogus", /\/wiz <light>/],
 		["escritorio discover", /takes no light name/],
@@ -129,10 +127,10 @@ test("S1: each form calls the right engine method", async () => {
 	const h = setup();
 	await h.run("on");
 	await h.run("off");
-	await h.run("dim 40");
-	await h.run("temp 3200");
-	await h.run("color #ffcc00");
-	await h.run("scene 6");
+	await h.run("40");
+	await h.run("3200k");
+	await h.run("#ffcc00");
+	await h.run("cozy");
 	await h.run("status");
 	await h.run("discover");
 	await h.run("help");
@@ -159,8 +157,8 @@ test("S1: each form calls the right engine method", async () => {
 
 test("S1: a named form and a bare name reach the engine with the light", async () => {
 	const h = setup();
-	await h.run("Escritorio dim 40");
-	await h.run("cocina");
+	await h.run("Escritorio 40");
+	await h.run("cocina status");
 	assert.deepEqual(h.calls.filter((c) => c !== "lights"), ["dim:40:escritorio", "status:cocina"]);
 	assert.deepEqual(
 		h.notes.map(([m]) => m),
@@ -189,7 +187,7 @@ test("an engine error becomes an error notify and never escapes the handler", as
 test("a thrown non-Wiz error also becomes an error notify", async () => {
 	const h = setup();
 	h.fail(new Error("socket blew up"));
-	await h.run("dim 40");
+	await h.run("40");
 	assert.equal(h.notes[0][1], "error");
 	assert.match(h.notes[0][0], /socket blew up/);
 });
@@ -217,11 +215,11 @@ test("S1: completions offer the fixed forms and the configured light names", () 
 	assert.ok(values("").includes("discover"));
 	assert.ok(values("").includes("escritorio"));
 	assert.ok(values("").includes("cocina"));
-	assert.deepEqual(values("dim"), ["dim"]);
+	assert.deepEqual(values("tog"), ["toggle"]);
 	assert.deepEqual(values("ESC"), ["escritorio"]);
 	assert.deepEqual(values("zzz"), []);
-	assert.ok(values("escritorio d").includes("escritorio dim"));
-	assert.ok(values("escritorio d").every((v) => v.startsWith("escritorio d")), "only things that start with d");
+	assert.ok(values("escritorio t").includes("escritorio toggle"));
+	assert.ok(values("escritorio t").every((v) => v.startsWith("escritorio t")), "only things that start with t");
 	assert.deepEqual(values("escritorio zzz"), []);
 });
 

@@ -99,3 +99,11 @@ injected, plus a thin extension.
   menus for a bare `color|dim|temp|scene` through `ctx.ui.select` (colours with swatches), completions that ignore accents.
   Engine gained `toggle` and `dimBy`. A light named like a colour wins. 138 tests (22 new). Three of the worker's tests encoded
   the old usage text / "bare dim is an error" and were updated, not weakened. Unverified: how the menus look in the user's terminal.
+- L13 (user, verbatim): "podes hacer que /wiz muestre los posibles parametros y que bloquee el enter?" → chose "Menú al dar Enter";
+  then "no me gusta tener comandos repetidos"; chose the verbs in English ("Inglés") and said "on off estan bien". Decision: ONE way
+  per action. `/wiz` alone opens a menu listing every action with how to type it (`ctx.ui.select`, a second list for brightness,
+  colour, white and scene); nothing runs until you pick, Esc cancels. Forms: on, off, toggle, status, pick, discover, help.
+  Shortcuts: `40`, `+10`/`-10`/`+`/`-`, `3200k`, `#hex`, a Spanish colour or white name, a WiZ scene name. REMOVED: every Spanish verb,
+  `dim/temp/color/scene <value>`, `40%`, English colour names, `blanco`, Spanish scene aliases, numeric scenes. A light named like a
+  colour wins. The new tests fail on the previous commit (11 of 19). Seven of the worker's tests were retargeted to the new
+  spelling keeping what they verify. 135 tests. Unverified: how the menu looks in the user's terminal.

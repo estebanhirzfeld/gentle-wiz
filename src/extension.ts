@@ -48,40 +48,22 @@ export interface ExtensionOptions {
 }
 
 export const USAGE = `/wiz — WiZ lights
-  /wiz                         state of every light
-  /wiz on | off | toggle       switch (also: prender, apagar, alternar)
-  /wiz 40                      brightness 10-100 (40%, +10, -10, brillo 40)
-  /wiz azul                    colour by name: rojo naranja amarillo verde turquesa celeste azul violeta rosa magenta
-                               (or hex: /wiz #ffcc00)
-  /wiz calido                  white by name: vela calido neutro frio (or temp 3200)
-  /wiz cozy                    scene by name or number (scene 6)
-  /wiz color | dim | temp | scene     open a menu to choose from
-  /wiz pick                    live colour editor
-  /wiz discover | help         find lights / this help
+  /wiz                  menu with every action (Enter picks, Esc cancels)
+  /wiz on | off | toggle | status
+  /wiz 40               brightness 10-100 (+10 / -10: relative to now)
+  /wiz azul             colour: rojo naranja amarillo verde turquesa celeste azul violeta rosa magenta, or #ffcc00
+  /wiz calido           white: vela calido neutro frio, or exact kelvin: 3200k (2200-6500)
+  /wiz cozy             scene by its WiZ name (the menu lists them all)
+  /wiz pick             live colour editor
+  /wiz discover | help  find lights / this help
   /wiz <light> <any of the above>      e.g. /wiz escritorio azul
 temp and color take the light out of its scene.`;
 
-const FORMS = ["on", "off", "toggle", "dim", "temp", "color", "scene", "pick", "status", "discover", "help"] as const;
+const FORMS = ["on", "off", "toggle", "status", "pick", "discover", "help"] as const;
 /** Forms that make sense for one named light. */
-const NAME_FORMS = ["on", "off", "toggle", "dim", "temp", "color", "scene", "pick", "status"] as const;
+const NAME_FORMS = ["on", "off", "toggle", "status", "pick"] as const;
 
-type Verb = (typeof FORMS)[number];
-/** English and Spanish words for the fixed forms (matched after normalising case and accents). */
-const VERBS: Record<string, Verb> = {
-	on: "on", prender: "on", prende: "on", encender: "on", enciende: "on",
-	off: "off", apagar: "off", apaga: "off",
-	toggle: "toggle", alternar: "toggle", alterna: "toggle",
-	status: "status", estado: "status",
-	dim: "dim", brillo: "dim", intensidad: "dim",
-	temp: "temp", temperatura: "temp",
-	color: "color",
-	scene: "scene", escena: "scene",
-	pick: "pick", elegir: "pick", elige: "pick",
-	discover: "discover", buscar: "discover", busca: "discover",
-	help: "help", ayuda: "help",
-};
-
-const RANGES = { dim: [10, 100], temp: [2200, 6500], scene: [1, 32] } as const;
+const RANGES = { dim: [10, 100], temp: [2200, 6500] } as const;
 const HEX = /^#[0-9a-f]{3}(?:[0-9a-f]{3})?$/i;
 
 export type WizAction =
@@ -89,7 +71,7 @@ export type WizAction =
 	| { kind: "dim" | "temp" | "scene"; value: number; name?: string }
 	| { kind: "dimBy"; delta: number; name?: string }
 	| { kind: "color"; value: string; name?: string }
-	| { kind: "menu"; of: "dim" | "temp" | "scene" | "color"; name?: string }
+	| { kind: "menu"; name?: string }
 	| { kind: "pick"; name?: string }
 	| { kind: "discover" | "help" }
 	| { kind: "error"; message: string };
@@ -98,25 +80,17 @@ function fail(message: string): WizAction {
 	return { kind: "error", message: `${message}\n${USAGE}` };
 }
 
-function inRange(kind: "dim" | "temp" | "scene", value: number, name?: string): WizAction {
+function inRange(kind: "dim" | "temp", value: number, name?: string): WizAction {
 	const [min, max] = RANGES[kind];
 	if (value < min || value > max) return fail(`${kind} must be from ${min} to ${max}.`);
 	return { kind, value, name };
 }
 
-/** `40`, `40%`, `+10`, `-5`, `+`, `-`: an absolute or relative brightness; undefined when it is neither. */
-function brightness(text: string, name?: string): WizAction | undefined {
-	const relative = /^([+-])(\d*)%?$/.exec(text);
-	if (relative) return { kind: "dimBy", delta: (relative[1] === "-" ? -1 : 1) * (relative[2] ? Number(relative[2]) : 10), name };
-	const absolute = /^(\d+)%?$/.exec(text);
-	if (absolute) return inRange("dim", Number(absolute[1]), name);
-	return undefined;
-}
-
 /**
  * Deterministic: the argument is normalised (case, accents, spaces), an optional configured light name
- * is taken off the front, and what is left must be one fixed form, a bare shortcut (a brightness, a
- * colour, a white or a scene name) or it is rejected with the usage. A light named like a colour wins.
+ * is taken off the front, and what is left must be exactly one of: nothing (the menu), a fixed form, or a
+ * shortcut (`40`, `+10`, `3200k`, `#hex`, a colour, white or scene name). Anything else is rejected with
+ * the usage. There is one way to say each thing. A light named like a colour wins over the colour.
  */
 export function parseWiz(args: string, lights: string[]): WizAction {
 	const tokens = normalize(args ?? "").split(" ").filter(Boolean);
@@ -129,64 +103,54 @@ export function parseWiz(args: string, lights: string[]): WizAction {
 			rest = tokens.slice(1);
 		}
 	}
-	if (rest.length === 0) return { kind: "status", name };
+	if (rest.length === 0) return { kind: "menu", name };
 
 	const phrase = rest.join(" ");
-	const verb = VERBS[rest[0]];
-	const value = rest.slice(1).join(" ");
-	if (!verb) {
-		const direct =
-			brightness(phrase, name) ??
-			(HEX.test(phrase) ? ({ kind: "color", value: phrase, name } as WizAction) : undefined);
-		if (direct) return direct;
-		const colour = resolveColor(phrase);
-		if (colour) return { kind: "color", value: colour, name };
-		const white = resolveTemp(phrase);
-		if (white !== undefined) return { kind: "temp", value: white, name };
-		const scene = resolveScene(phrase);
-		if (scene !== undefined) return { kind: "scene", value: scene, name };
-		return fail(`I don't understand "/wiz ${phrase}".`);
+	const form = (FORMS as readonly string[]).includes(rest[0]) ? (rest[0] as (typeof FORMS)[number]) : undefined;
+	if (form) {
+		if (rest.length > 1) {
+			return fail(
+				form === "pick"
+					? "pick takes no value; open it with /wiz pick or /wiz <light> pick."
+					: `${form} takes no value.`,
+			);
+		}
+		if (form === "discover" || form === "help") {
+			return name ? fail(`${form} takes no light name.`) : { kind: form };
+		}
+		return { kind: form, name };
 	}
 
-	switch (verb) {
-		case "on":
-		case "off":
-		case "toggle":
-		case "status":
-			return { kind: verb, name };
-		case "dim":
-			if (!value) return { kind: "menu", of: "dim", name };
-			return brightness(value, name) ?? fail("dim needs a whole number, e.g. /wiz dim 40, or +10 / -10.");
-		case "temp": {
-			if (!value) return { kind: "menu", of: "temp", name };
-			if (/^\d+$/.test(value)) return inRange("temp", Number(value), name);
-			const white = resolveTemp(value);
-			if (white !== undefined) return { kind: "temp", value: white, name };
-			return fail("temp needs a whole number, e.g. /wiz temp 3200, or a name: calido, neutro, frio.");
-		}
-		case "scene": {
-			if (!value) return { kind: "menu", of: "scene", name };
-			if (/^\d+$/.test(value)) return inRange("scene", Number(value), name);
-			const scene = resolveScene(value);
-			if (scene !== undefined) return { kind: "scene", value: scene, name };
-			return fail("scene needs a whole number, e.g. /wiz scene 6, or a name like cozy.");
-		}
-		case "color": {
-			if (!value) return { kind: "menu", of: "color", name };
-			if (HEX.test(value)) return { kind: "color", value, name };
-			const colour = resolveColor(value);
-			if (colour) return { kind: "color", value: colour, name };
-			return fail("color must be #rgb, #rrggbb or a name (rojo, azul, ...), e.g. /wiz color #ffcc00.");
-		}
-		case "pick":
-			if (value) return fail("pick takes no value; open it with /wiz pick or /wiz <light> pick.");
-			return { kind: "pick", name };
-		case "discover":
-			return name ? fail("discover takes no light name.") : { kind: "discover" };
-		case "help":
-			return name ? fail("help takes no light name.") : { kind: "help" };
-	}
+	const relative = /^([+-])(\d*)$/.exec(phrase);
+	if (relative) return { kind: "dimBy", delta: (relative[1] === "-" ? -1 : 1) * (relative[2] ? Number(relative[2]) : 10), name };
+	const absolute = /^(\d+)$/.exec(phrase);
+	if (absolute) return inRange("dim", Number(absolute[1]), name);
+	const kelvin = /^(\d+)k$/.exec(phrase);
+	if (kelvin) return inRange("temp", Number(kelvin[1]), name);
+	if (HEX.test(phrase)) return { kind: "color", value: phrase, name };
+	const colour = resolveColor(phrase);
+	if (colour) return { kind: "color", value: colour, name };
+	const white = resolveTemp(phrase);
+	if (white !== undefined) return { kind: "temp", value: white, name };
+	const scene = resolveScene(phrase);
+	if (scene !== undefined) return { kind: "scene", value: scene, name };
+	return fail(`I don't understand "/wiz ${phrase}".`);
 }
+
+/** The top-level menu: what each action is, and how to type it next time. */
+const MAIN_MENU = [
+	{ id: "status", label: "Status               /wiz status" },
+	{ id: "on", label: "On                   /wiz on" },
+	{ id: "off", label: "Off                  /wiz off" },
+	{ id: "toggle", label: "Toggle               /wiz toggle" },
+	{ id: "dim", label: "Brightness…          /wiz 40  ·  +10  ·  -10" },
+	{ id: "color", label: "Color…               /wiz azul  ·  #ffcc00" },
+	{ id: "temp", label: "White…               /wiz calido  ·  3200k" },
+	{ id: "scene", label: "Scene…               /wiz cozy" },
+	{ id: "pick", label: "Live color editor    /wiz pick" },
+	{ id: "discover", label: "Discover lights      /wiz discover" },
+	{ id: "help", label: "Help                 /wiz help" },
+] as const;
 
 function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -296,29 +260,35 @@ export function createExtension(options: ExtensionOptions = {}) {
 			}
 		}
 
-		/** A bare `color`/`dim`/`temp`/`scene` opens a menu; the choice runs like the explicit form. */
+		/** `/wiz` alone: pick an action; the ones that need a value open a second list. */
 		async function menu(action: Extract<WizAction, { kind: "menu" }>, ui: Ctx["ui"]): Promise<void> {
 			if (typeof ui.select !== "function") {
-				const example = { color: "/wiz color azul", dim: "/wiz dim 40", temp: "/wiz temp calido", scene: "/wiz scene cozy" }[action.of];
-				ui.notify(`This interface has no menus. Pass a value instead, e.g. ${example}.`, "error");
+				ui.notify("This interface has no menus. Type /wiz help to see the commands.", "error");
 				return;
 			}
 			const name = action.name;
+			const first = await ui.select(name ? `/wiz ${name}` : "/wiz", MAIN_MENU.map((m) => m.label));
+			const entry = MAIN_MENU.find((m) => m.label === first);
 			let chosen: WizAction | undefined;
-			if (action.of === "color") {
-				const label = await ui.select("Color:", COLOR_MENU.map((c) => c.label));
+			if (entry?.id === "pick") return pick(name, ui);
+			if (entry?.id === "status" || entry?.id === "on" || entry?.id === "off" || entry?.id === "toggle") {
+				chosen = { kind: entry.id, name };
+			} else if (entry?.id === "discover" || entry?.id === "help") {
+				chosen = { kind: entry.id };
+			} else if (entry?.id === "color") {
+				const label = await ui.select("Color", COLOR_MENU.map((c) => c.label));
 				const item = COLOR_MENU.find((c) => c.label === label);
 				if (item) chosen = { kind: "color", value: item.hex, name };
-			} else if (action.of === "dim") {
-				const label = await ui.select("Brightness:", DIM_MENU.map((n) => `${n}%`));
+			} else if (entry?.id === "dim") {
+				const label = await ui.select("Brightness", DIM_MENU.map((n) => `${n}%`));
 				const value = DIM_MENU.find((n) => `${n}%` === label);
 				if (value !== undefined) chosen = { kind: "dim", value, name };
-			} else if (action.of === "temp") {
-				const label = await ui.select("White:", TEMP_MENU.map(([text, kelvin]) => `${text} ${kelvin}K`));
+			} else if (entry?.id === "temp") {
+				const label = await ui.select("White", TEMP_MENU.map(([text, kelvin]) => `${text} ${kelvin}K`));
 				const item = TEMP_MENU.find(([text, kelvin]) => `${text} ${kelvin}K` === label);
 				if (item) chosen = { kind: "temp", value: item[1], name };
-			} else {
-				const label = await ui.select("Scene:", SCENE_MENU.map((s) => s.label));
+			} else if (entry?.id === "scene") {
+				const label = await ui.select("Scene", SCENE_MENU.map((s) => s.label));
 				const item = SCENE_MENU.find((s) => s.label === label);
 				if (item) chosen = { kind: "scene", value: item.id, name };
 			}
@@ -353,7 +323,7 @@ export function createExtension(options: ExtensionOptions = {}) {
 		}
 
 		pi.registerCommand("wiz", {
-			description: "WiZ lights: /wiz on|off|toggle, /wiz 40, /wiz azul, /wiz calido, /wiz cozy, /wiz pick, /wiz help",
+			description: "WiZ lights: /wiz (menu), on|off|toggle, 40, azul, calido, cozy, pick, help",
 			getArgumentCompletions: (prefix: string) => {
 				const names = lightNames();
 				// Accents and case do not matter; a trailing space does (it means "start the next word").

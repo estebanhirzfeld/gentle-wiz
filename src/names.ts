@@ -2,7 +2,7 @@
  * Names for the things `/wiz` takes: colours, white temperatures and scenes.
  *
  * Pure data and lookups, so every name is a fixed, testable fact. Matching ignores case, accents,
- * hyphens and extra spaces, in Spanish or English. Scene ids and names are the ones published by
+ * hyphens and extra spaces. One name per thing: colours and whites are Spanish, scenes keep the names the WiZ app uses. Scene ids and names are the ones published by
  * pywizlight (scenes.py); ids above 32 and the sync scenes are left out on purpose, because the
  * engine only accepts 1-32.
  */
@@ -34,40 +34,17 @@ export const COLORS: Record<string, [string, string]> = {
 	magenta: ["Magenta", "#ff00aa"],
 };
 
-const COLOR_ALIASES: Record<string, string> = {
-	red: "rojo",
-	orange: "naranja",
-	yellow: "amarillo",
-	green: "verde",
-	teal: "turquesa",
-	turquoise: "turquesa",
-	cyan: "celeste",
-	"sky blue": "celeste",
-	blue: "azul",
-	purple: "violeta",
-	violet: "violeta",
-	pink: "rosa",
-};
-
 export function resolveColor(word: string): string | undefined {
-	const key = normalize(word);
-	const canonical = COLOR_ALIASES[key] ?? key;
-	return COLORS[canonical]?.[1];
+	return COLORS[normalize(word)]?.[1];
 }
 
 // ---------------------------------------------------------------------------------- white temperature
 
 const TEMPS: Record<string, number> = {
 	vela: 2200,
-	candle: 2200,
 	calido: 2700,
-	warm: 2700,
 	neutro: 4000,
-	neutral: 4000,
-	blanco: 4000,
-	white: 4000,
 	frio: 6500,
-	cool: 6500,
 };
 
 export function resolveTemp(word: string): number | undefined {
@@ -119,31 +96,9 @@ export const SCENES: Array<[number, string]> = [
 	[32, "Steampunk"],
 ];
 
-/** Spanish names for the scenes whose translation is obvious. */
-const SCENE_ALIASES: Record<string, number> = {
-	oceano: 1,
-	atardecer: 3,
-	fiesta: 4,
-	chimenea: 5,
-	acogedor: 6,
-	bosque: 7,
-	pastel: 8,
-	despertar: 9,
-	dormir: 10,
-	"luz del dia": 12,
-	noche: 14,
-	enfoque: 15,
-	primavera: 20,
-	verano: 21,
-	otono: 22,
-	selva: 24,
-	navidad: 27,
-	pulso: 31,
-};
-
 export function resolveScene(word: string): number | undefined {
 	const key = normalize(word);
-	return SCENES.find(([, name]) => normalize(name) === key)?.[0] ?? SCENE_ALIASES[key];
+	return SCENES.find(([, name]) => normalize(name) === key)?.[0];
 }
 
 // ------------------------------------------------------------------------------------------- menus
@@ -172,9 +127,9 @@ export const SCENE_MENU: Array<{ label: string; id: number }> = [...SCENES]
 /** Words worth completing after `/wiz `, besides the forms and the light names. */
 export const SUGGESTIONS: string[] = [
 	...Object.keys(COLORS),
+	"vela",
 	"calido",
 	"neutro",
 	"frio",
-	"blanco",
 	...SCENES.map(([, name]) => normalize(name)),
 ];
