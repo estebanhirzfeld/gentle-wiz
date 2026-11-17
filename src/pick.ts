@@ -73,13 +73,14 @@ export function piKeys(tui: {
 	};
 }
 
-export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-	const c = (1 - Math.abs(2 * l - 1)) * s;
+/** HSV (h 0-360, s/v 0-1) to 0-255 RGB. The colour a bulb is sent is always at full value: brightness is its `dimming`. */
+export function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
+	const c = v * s;
 	const hp = ((((h % 360) + 360) % 360) / 60);
 	const x = c * (1 - Math.abs((hp % 2) - 1));
 	const [r1, g1, b1] =
 		hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x] : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x];
-	const m = l - c / 2;
+	const m = v - c;
 	return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)];
 }
 
@@ -87,15 +88,14 @@ export function toHex([r, g, b]: [number, number, number]): string {
 	return "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("");
 }
 
+/** The colour to send: tone and saturation at full value. Brightness (`dim`) travels separately as the light's dimming. */
 export function pickHex(state: PickState): string {
-	return toHex(hslToRgb(state.hue, state.sat / 100, state.dim / 100));
+	return toHex(hsvToRgb(state.hue, state.sat / 100, 1));
 }
 
 /** A name for the current colour, so the UI never shows raw degrees. */
-export function colorName(hue: number, sat: number, dim: number): string {
-	if (sat < 12) return dim > 70 ? "blanco" : dim < 20 ? "apagado" : "gris";
-	if (dim > 88) return "muy claro";
-	if (dim < 14) return "casi negro";
+export function colorName(hue: number, sat: number): string {
+	if (sat < 12) return "blanco";
 	const table: Array<[number, string]> = [
 		[15, "rojo"],
 		[40, "naranja"],
@@ -140,7 +140,7 @@ export class BarsComponent {
 	}
 
 	rgb(): [number, number, number] {
-		return hslToRgb(this.state.hue, this.state.sat / 100, this.state.dim / 100);
+		return hsvToRgb(this.state.hue, this.state.sat / 100, 1);
 	}
 
 	hex(): string {
@@ -149,15 +149,16 @@ export class BarsComponent {
 
 	private ramp(kind: "hue" | "dim" | "sat", cells: number): string {
 		const out: string[] = [];
+		const floor = MIN_DIM / 100;
 		for (let i = 0; i < cells; i++) {
 			const t = cells === 1 ? 0 : i / (cells - 1);
-			let h = this.state.hue / 360;
+			let h = this.state.hue;
 			let s = this.state.sat / 100;
-			let l = this.state.dim / 100;
-			if (kind === "hue") h = t;
+			let v = 1;
+			if (kind === "hue") h = t * 360;
 			else if (kind === "sat") s = t;
-			else l = 0.05 + t * 0.9;
-			out.push(swatch(hslToRgb(h * 360, s, l), 1));
+			else v = floor + t * (1 - floor); // dark -> the pure colour, never white
+			out.push(swatch(hsvToRgb(h, s, v), 1));
 		}
 		return out.join("");
 	}
@@ -169,7 +170,7 @@ export class BarsComponent {
 	}
 
 	private valueText(kind: "hue" | "dim" | "sat"): string {
-		if (kind === "hue") return colorName(this.state.hue, this.state.sat, this.state.dim);
+		if (kind === "hue") return colorName(this.state.hue, this.state.sat);
 		if (kind === "sat") return `${this.state.sat}%`;
 		return `${this.state.dim}%`;
 	}

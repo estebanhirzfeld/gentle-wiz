@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BarsComponent, colorName, hslToRgb, pickHex, piKeys } from "../src/pick.ts";
+import { BarsComponent, colorName, hsvToRgb, pickHex, piKeys } from "../src/pick.ts";
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 const make = () => {
@@ -75,15 +75,16 @@ test("changing a value counts as a send; moving rows does not", () => {
 });
 
 test("colour names are human, not degrees", () => {
-	assert.equal(colorName(210, 85, 60), "azul");
-	assert.equal(colorName(0, 90, 50), "rojo");
-	assert.equal(colorName(210, 5, 50), "gris");
-	assert.equal(colorName(210, 85, 95), "muy claro");
+	assert.equal(colorName(210, 85), "azul");
+	assert.equal(colorName(0, 90), "rojo");
+	assert.equal(colorName(210, 5), "blanco", "no saturation is white at full value");
 });
 
-test("hsl to hex", () => {
-	assert.equal(pickHex({ hue: 0, sat: 100, dim: 50 }), hslToRgb(0, 1, 0.5).map(() => "").length ? pickHex({ hue: 0, sat: 100, dim: 50 }) : "");
-	assert.equal(pickHex({ hue: 210, sat: 85, dim: 60 }), "#4299f0");
+test("the colour is pure: tone and saturation only, brightness never changes it", () => {
+	assert.equal(pickHex({ hue: 0, sat: 100, dim: 10 }), "#ff0000");
+	assert.equal(pickHex({ hue: 0, sat: 100, dim: 100 }), "#ff0000", "brightness is the light's dimming, not part of the colour");
+	assert.equal(pickHex({ hue: 210, sat: 0, dim: 50 }), "#ffffff");
+	assert.deepEqual(hsvToRgb(120, 1, 1), [0, 255, 0]);
 	assert.match(pickHex({ hue: 360, sat: 100, dim: 100 }), /^#[0-9a-f]{6}$/);
 });
 
@@ -209,4 +210,30 @@ test("layout: the marker follows the value in between", () => {
 	c.state.sat = 50;
 	const col = markerColumn(c);
 	assert.ok(Math.abs(col - (start + (cells - 1) / 2)) <= 1, `50% is in the middle (col ${col})`);
+});
+
+const cells = (line: string) => [...line.matchAll(/\x1b\[48;2;(\d+);(\d+);(\d+)m/g)].map((m) => [Number(m[1]), Number(m[2]), Number(m[3])]);
+
+test("brightness bar runs from dark to the PURE colour, never to white", () => {
+	const c = new BarsComponent({ requestRender() {} }, () => {}, { hue: 0, sat: 100, dim: 35 });
+	const row = c.render(60).find((l) => plain(l).includes("Brillo"))!;
+	const colours = cells(row);
+	assert.deepEqual(colours.at(-1), [255, 0, 0], "last cell is the pure colour");
+	assert.ok(colours[0][0] < 40 && colours[0][1] === 0 && colours[0][2] === 0, "first cell is dark");
+	assert.ok(colours.every(([, g, b]) => g === 0 && b === 0), "never washes out toward white");
+});
+
+test("the swatch shows the colour that will be sent, not a darkened one", () => {
+	const c = new BarsComponent({ requestRender() {} }, () => {}, { hue: 0, sat: 100, dim: 10 });
+	const swatchRow = c.render(60)[2];
+	assert.deepEqual(cells(swatchRow)[0], [255, 0, 0]);
+});
+
+test("the tone and saturation bars always show full-value colours", () => {
+	const c = new BarsComponent({ requestRender() {} }, () => {}, { hue: 120, sat: 100, dim: 20 });
+	const tone = cells(c.render(60).find((l) => plain(l).includes("Tono"))!);
+	assert.ok(tone.every((rgb) => Math.max(...rgb) === 255), "every tone cell is at full value");
+	const sat = cells(c.render(60).find((l) => plain(l).includes("Saturación"))!);
+	assert.deepEqual(sat[0], [255, 255, 255], "no saturation = white");
+	assert.deepEqual(sat.at(-1), [0, 255, 0], "full saturation = pure tone");
 });

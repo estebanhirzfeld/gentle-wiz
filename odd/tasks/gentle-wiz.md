@@ -66,3 +66,7 @@ injected, plus a thin extension.
   bold and `padEnd` counted the escape codes, so its bar started 7 columns early (bars at 9,16,16); (2) the marker offset
   omitted the label column, so 100% landed ~70% along the bar. Fixed test-first with column-measuring tests (bars align,
   equal cell count, marker on first/last cell at min/max, middle in between). 65 tests.
+- L9 (user, verbatim): chose "Sí, que coincida con el foco" for the Brillo semantics. Decision: the colour is HSV at full value
+  (tone + saturation); Brillo is the light's `dimming` (10-100), sent separately. The Brillo bar runs from dark to the
+  PURE colour (never white), the swatch and hex are the pure colour, `colorName(hue, sat)` no longer depends on brightness.
+  68 tests.
