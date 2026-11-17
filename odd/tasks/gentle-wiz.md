@@ -85,3 +85,11 @@ injected, plus a thin extension.
 
 - [x] T5 S9 — `/wiz pick`: snapshot + restore in the engine (`7a139e1`), throttled live sender (`7a139e1`),
   overlay wiring in the extension (`0b3b352`), README (`0b3b352`).
+- L11 (evidence, parent review of T5): end-to-end simulation on the real extension with a fake light in scene 6 at 100%
+  (TEST-NET address, injected transport): opening = 1 getPilot and 0 writes; 40 key presses over 1 s = 9 sends, at most
+  8 in any one second, 1 in flight at a time; Enter leaves the light exactly at the pending colour and dimming; Esc restores
+  `{state:true,dimming:100,sceneId:6}` exactly. Two findings fixed test-first: (1) opening and closing without moving a bar
+  wrote a pointless "restore" (could restart a scene) and Enter claimed a colour that was never sent; now nothing is written
+  and the command says `No changes on <light>`; (2) KNOWN LIMIT, not fixed: a light that was OFF when opened is turned off by
+  Esc but keeps the previewed colour/dimming (restore of an off light sends only `{state:false}`); needs the real bulb to
+  decide the right payload. Two of the worker's tests encoded the old behaviour and were updated, not weakened. 116 tests.

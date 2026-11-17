@@ -66,7 +66,11 @@ brightness; a light in a scene or with tunable white starts from a friendly blue
 - **Esc** cancels: pending sends are dropped, any send in flight is allowed to settle, and
   the light is restored to exactly how it was when the editor opened (scene, temperature,
   colour, brightness, or off). If the light was off, the first change turns it on and Esc
-  turns it back off.
+  turns it back off — but it may then come back on in the colour you were previewing rather
+  than the one it had before (not verified on a real bulb, so treat it as a known limit).
+- Opening the editor sends nothing. If you close it without moving a bar, nothing is
+  written to the light either (no "restore", so a running scene is not restarted) and the
+  command says `No changes on <light>`.
 - With several lights configured, name one (`/wiz escritorio pick`); a live editor must
   not move every light at once.
 

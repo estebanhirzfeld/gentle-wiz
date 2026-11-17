@@ -196,17 +196,26 @@ export function createExtension(options: ExtensionOptions = {}) {
 				},
 			});
 			let last: PickState = { ...initial };
+			let changed = false; // nothing is written to the light until the first real change
 			const result = await ui.custom(
 				(tui, _theme, _keybindings, done) =>
 					new BarsComponent(tui, done, initial, {
 						onChange: (state) => {
 							last = { ...state };
+							changed = true;
 							// The pure colour (full value) plus the light's dimming, at most 8 sends/s.
 							live.push({ rgb: hsvToRgb(state.hue, state.sat / 100, 1), dim: state.dim });
 						},
 					}, keys),
 				PICK_UI,
 			);
+			if (!changed) {
+				// Opened and closed without moving a bar: writing a "restore" could restart a scene, and
+				// Enter must not claim a colour that was never sent.
+				await live.cancel();
+				ui.notify(`No changes on ${snapshot.light.name}`, "info");
+				return;
+			}
 			if (result === undefined) {
 				// Esc: drop pending sends (and let an in-flight one settle, so the
 				// restore cannot be overtaken), then put the light back how it was.

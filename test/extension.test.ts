@@ -406,16 +406,13 @@ test("S9: a change sends applyColor with the pure colour and the light's dimming
 	);
 });
 
-test("S9: Enter flushes and notifies the colour and dimming on the light", async () => {
+test("S9: Enter without any change says so and sends nothing", async () => {
 	const h = pickSetup();
 	const finish = await openPick(h);
 	h.component!.handleInput("\r"); // no changes: nothing pending, so nothing is sent
 	await finish();
 	assert.equal(h.calls.filter((c) => c.startsWith("applyColor:")).length, 0, "opening alone never sent a colour");
-	assert.deepEqual(
-		h.notes.map(([m]) => m),
-		[`Color ${pickHex({ hue: 210, sat: 85, dim: 100 })}, dimming 100% on escritorio`],
-	);
+	assert.deepEqual(h.notes.map(([m]) => m), ["No changes on escritorio"], "it must not claim a colour was applied");
 	assert.ok(h.notes.every(([, l]) => l === "info"));
 });
 
@@ -487,6 +484,7 @@ test("S9: without ctx.ui.custom at all, an error is notified and nothing is sent
 test("S9: a failing restore is an error notify that names the light and the snapshot", async () => {
 	const h = pickSetup({ restoreFails: true });
 	const finish = await openPick(h);
+	h.component!.handleInput("\x1b[C"); // a real change, so there is something to restore
 	h.component!.handleInput("\x1b");
 	await finish();
 	const [msg, level] = h.notes[0];
