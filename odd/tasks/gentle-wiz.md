@@ -43,3 +43,16 @@ injected, plus a thin extension.
 - L3 (user): chose "Probá escritura primero" and said it is the only light in the network. Write test:
   dimming 20% then restored to 100% + scene 6, read back identical.
 - L4 (decision): separate package `gentle-wiz` in ~/Desktop/gentle-wiz; lights do not belong in gentle-spotify.
+
+## Addendum: el editor en vivo (W5)
+
+- L5 (user): "si podes mostrar los colores no podes hacer algo como rgb dim te desplazas arriba o abajo y a los costados
+  para variar la intensidad de colores y dim?" → prototipo inline/overlay; user: "no me gusta como se ve siento que no es
+  clara la ui/ux", con "No veo la gama de colores" como causa y "B: barras de control" como dirección.
+- L6 (user): "genial, me gusta el pcik como modal, pero agregaria un poquito de padding y un border" → definitivo:
+  overlay centrado, marco `┌─┐│└┘`, padding de 2, tres barras con degradado real (tono/brillo/saturación), `▲` de
+  posición y nombre de color en lugar de grados.
+- **S8**: `src/pick.ts` — componente puro: calcula y dibuja, reporta cada cambio por `onChange`; sin red ni timers.
+  Envío al foco con throttle y restauración al cancelar = trabajo del llamador (`/wiz pick`), pendiente.
+
+- [ ] W5a S8 — conectar `/wiz pick`: overlay, envío con throttle (~8/s, solo el último), restaurar escena/al encender.
