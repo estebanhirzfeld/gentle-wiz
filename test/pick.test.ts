@@ -155,3 +155,58 @@ test("piKeys adapts matchesKey and shows its label", () => {
 	assert.equal(c.state.hue, 220);
 	assert.match(c.render(60).map(plain).join("\n"), /\[pi-tui\]/);
 });
+
+// --- layout: measure real columns, ignoring colour codes -------------------------------------------------
+const visible = (s: string) => plain(s).length;
+/** Visible column where a row's colour bar starts, and how many cells it has. */
+const bar = (line: string) => {
+	const first = line.indexOf("\x1b[48;2;");
+	return { start: first < 0 ? -1 : visible(line.slice(0, first)), cells: (line.match(/\x1b\[48;2;/g) ?? []).length };
+};
+const barRows = (c: BarsComponent) => c.render(60).filter((l) => /Tono|Brillo|Saturación/.test(plain(l)));
+
+test("layout: the bars start in the same column whichever row is selected", () => {
+	const { c } = make();
+	for (let step = 0; step < 3; step++) {
+		const starts = barRows(c).map((l) => bar(l).start);
+		assert.equal(new Set(starts).size, 1, `row ${c.row} selected: bars start at ${starts.join(", ")}`);
+		c.handleInput("\x1b[B");
+	}
+});
+
+test("layout: every bar has the same number of cells", () => {
+	const { c } = make();
+	const cells = barRows(c).map((l) => bar(l).cells);
+	assert.equal(new Set(cells).size, 1, `cells: ${cells.join(", ")}`);
+	assert.ok(cells[0] >= 10);
+});
+
+/** Visible column of the ▲ under the selected row. */
+const markerColumn = (c: BarsComponent) => {
+	const lines = c.render(60);
+	const at = lines.findIndex((l) => plain(l).includes("▲"));
+	assert.ok(at > 0, "marker is drawn");
+	return visible(lines[at].slice(0, lines[at].indexOf("▲")));
+};
+
+test("layout: the marker sits on the bar's first cell at the minimum and its last cell at the maximum", () => {
+	// Saturación 0 / 100 (third row), Brillo 10 / 100 (second row).
+	for (const [row, key, min, max] of [[2, "sat", 0, 100], [1, "dim", 10, 100]] as const) {
+		const { c } = make();
+		c.row = row;
+		const { start, cells } = bar(barRows(c)[row]);
+		c.state[key] = min;
+		assert.equal(markerColumn(c), start, `${key} at ${min} is under the first cell`);
+		c.state[key] = max;
+		assert.equal(markerColumn(c), start + cells - 1, `${key} at ${max} is under the last cell`);
+	}
+});
+
+test("layout: the marker follows the value in between", () => {
+	const { c } = make();
+	c.row = 2;
+	const { start, cells } = bar(barRows(c)[2]);
+	c.state.sat = 50;
+	const col = markerColumn(c);
+	assert.ok(Math.abs(col - (start + (cells - 1) / 2)) <= 1, `50% is in the middle (col ${col})`);
+});

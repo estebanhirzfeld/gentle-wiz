@@ -228,11 +228,14 @@ export class BarsComponent {
 		BARS.forEach((kind, index) => {
 			const selected = index === this.row;
 			const pointer = selected ? bold("▸") : " ";
-			const label = (selected ? bold(LABEL[kind]) : LABEL[kind]).padEnd(labelWidth);
+			// Pad the plain text first: bold escape codes would count as characters and shift the bar.
+			const padded = LABEL[kind].padEnd(labelWidth);
+			const label = selected ? bold(padded) : padded;
 			const value = this.valueText(kind).padStart(valueWidth);
 			body.push(row(`${pointer} ${label}${this.ramp(kind, cells)}  ${value}`));
-			const markerPad = 2 + this.position(kind, cells);
-			body.push(row(`${" ".repeat(markerPad)}${selected ? "▲" : " "}${" ".repeat(Math.max(0, cells - markerPad))}`));
+			// The bar starts after the pointer, a space and the label column.
+			const markerPad = 2 + labelWidth + this.position(kind, cells);
+			body.push(row(`${" ".repeat(markerPad)}${selected ? "▲" : " "}`));
 		});
 
 		body.push(blank);

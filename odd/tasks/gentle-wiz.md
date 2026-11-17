@@ -61,3 +61,8 @@ injected, plus a thin extension.
   `\x1b[1;1:1A` as arrows; my raw `\x1b[A` comparison missed them, and Kitty sends key-release events (`:3`) that must not
   step. Fix: injectable `KeyApi` (`piKeys` adapts Pi's matchesKey; `rawKeys` fallback understands application-mode and
   Kitty), releases ignored, footer shows `última tecla: <raw> → <name> [matcher]`. 61 tests.
+- L8 (user, verbatim): "muchisimo mejor, pasan 2 cosas 1. que la barra se desplaza al ser elegida ... 2. el valor maximo no
+  llega hasta el extremo sino que queda poco desp de la mitad" (two screenshots). Evidence: (1) the selected row's label is
+  bold and `padEnd` counted the escape codes, so its bar started 7 columns early (bars at 9,16,16); (2) the marker offset
+  omitted the label column, so 100% landed ~70% along the bar. Fixed test-first with column-measuring tests (bars align,
+  equal cell count, marker on first/last cell at min/max, middle in between). 65 tests.
