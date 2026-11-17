@@ -34,6 +34,7 @@ build it: run `/wiz discover`, then paste the printed JSON and edit the names.
 /wiz temp <2200-6500>         white temperature in kelvin, e.g. /wiz temp 3200
 /wiz color <#rgb|#rrggbb>     color, e.g. /wiz color #ffcc00
 /wiz scene <1-32>             play a scene, e.g. /wiz scene 6
+/wiz pick                     live colour editor (see below), e.g. /wiz pick or /wiz escritorio pick
 /wiz status                   same as /wiz
 /wiz discover                 find lights and print the JSON for lights.json
 /wiz help                     this help
@@ -48,6 +49,26 @@ you to name one. Every result reports the state read back from the light, e.g.
 
 **Note:** `temp` and `color` take the light out of its scene — the command tells you, e.g.
 `... (left scene 6)`. Changing `dimming` keeps the scene.
+
+## Live colour editor (`/wiz pick`)
+
+`/wiz pick` (or `/wiz <light> pick`) opens a bordered overlay with three bars: **Tono** (hue),
+**Brillo** (brightness) and **Saturación**. It starts from the light's current colour and
+brightness; a light in a scene or with tunable white starts from a friendly blue.
+
+- ↑↓ move between bars, ←→ change the selected value.
+- The colour is the pure colour: tone + saturation at full value. Brillo is the light's
+  own `dimming` (10–100), sent separately — exactly how the bulb understands it.
+- Every change is sent to the light in real time, throttled to at most 8 sends per second
+  and only the last value; two sends never overlap.
+- **Enter** confirms: the pending value is flushed and the command reports
+  `Color #rrggbb, dimming N% on <light>`.
+- **Esc** cancels: pending sends are dropped, any send in flight is allowed to settle, and
+  the light is restored to exactly how it was when the editor opened (scene, temperature,
+  colour, brightness, or off). If the light was off, the first change turns it on and Esc
+  turns it back off.
+- With several lights configured, name one (`/wiz escritorio pick`); a live editor must
+  not move every light at once.
 
 ## Protocol
 

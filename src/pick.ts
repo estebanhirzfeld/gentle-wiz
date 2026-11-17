@@ -4,7 +4,6 @@
  * Pure by design: it computes and draws, and reports each change through `onChange`. Sending the value to a
  * light (throttled, and only the last one) is the caller's job, so this file has no network and no timer.
  */
-import type { Light } from "./config.ts";
 
 export interface PickState {
 	hue: number;
@@ -248,7 +247,37 @@ export class BarsComponent {
 	}
 }
 
-/** Starting point: a light's current colour when known, else a friendly blue. */
-export function initialStateFor(_light?: Light): PickState {
-	return { hue: 210, sat: 85, dim: 60 };
+/** Brightness never part of the colour: HSV at full value (see colorName/pickHex). */
+export function rgbToHsv([r, g, b]: [number, number, number]): [hue: number, sat: number] {
+	const max = Math.max(r, g, b);
+	const min = Math.min(r, g, b);
+	const delta = max - min;
+	let hue: number;
+	if (delta === 0) hue = 0;
+	else if (max === r) hue = 60 * (((g - b) / delta) % 6);
+	else if (max === g) hue = 60 * (b - r) / delta + 120;
+	else hue = 60 * (r - g) / delta + 240;
+	return [((hue % 360) + 360) % 360, max === 0 ? 0 : (delta / max) * 100];
+}
+
+const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
+
+/**
+ * Starting point for the editor: the light's current colour when the pilot
+ * has one (r/g/b, which also a light that was off keeps in its pilot), else
+ * a friendly blue. Brillo starts at the light's real dimming, clamped into
+ * the range the light accepts; a pilot without dimming falls back to 60%.
+ */
+export function initialStateFor(snapshot?: {
+	dimming: number | null;
+	r: number | null;
+	g: number | null;
+	b: number | null;
+}): PickState {
+	const dim = snapshot?.dimming != null ? clamp(Math.round(snapshot.dimming), MIN_DIM, MAX_DIM) : 60;
+	if (snapshot?.r != null && snapshot?.g != null && snapshot?.b != null) {
+		const [hue, sat] = rgbToHsv([snapshot.r, snapshot.g, snapshot.b]);
+		return { hue: Math.round(hue), sat: Math.round(sat), dim };
+	}
+	return { hue: 210, sat: 85, dim };
 }

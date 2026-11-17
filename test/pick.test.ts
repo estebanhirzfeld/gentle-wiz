@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BarsComponent, colorName, hsvToRgb, pickHex, piKeys } from "../src/pick.ts";
+import { BarsComponent, colorName, hsvToRgb, initialStateFor, pickHex, piKeys } from "../src/pick.ts";
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 const make = () => {
@@ -236,4 +236,50 @@ test("the tone and saturation bars always show full-value colours", () => {
 	const sat = cells(c.render(60).find((l) => plain(l).includes("Saturación"))!);
 	assert.deepEqual(sat[0], [255, 255, 255], "no saturation = white");
 	assert.deepEqual(sat.at(-1), [0, 255, 0], "full saturation = pure tone");
+});
+
+// --- S9: starting from the light's real state ---------------------------------------------
+import type { Snapshot } from "../src/wiz.ts";
+
+const snapshot = (over: Partial<Snapshot>): Snapshot => ({
+	light: { name: "escritorio", ip: "192.0.2.26" },
+	state: true,
+	dimming: 100,
+	sceneId: null,
+	temp: null,
+	r: null,
+	g: null,
+	b: null,
+	...over,
+});
+
+test("initialStateFor: a scene light with no colour starts at the friendly blue with its real brightness", () => {
+	assert.deepEqual(initialStateFor(snapshot({ sceneId: 6, dimming: 100 })), { hue: 210, sat: 85, dim: 100 });
+});
+
+test("initialStateFor: an rgb light starts at its own hue and saturation", () => {
+	const state = initialStateFor(snapshot({ r: 255, g: 136, b: 0, dimming: 40 }));
+	assert.equal(state.sat, 100);
+	assert.ok(Math.abs(state.hue - 32) <= 1, `hue of #ff8800 is ~32, got ${state.hue}`);
+	assert.equal(state.dim, 40);
+});
+
+test("initialStateFor: a tunable-white light without rgb starts at the friendly blue", () => {
+	assert.deepEqual(initialStateFor(snapshot({ temp: 3200, dimming: 55 })), { hue: 210, sat: 85, dim: 55 });
+});
+
+test("initialStateFor: dimming is clamped into 10-100; a missing dimming falls back to 60", () => {
+	assert.equal(initialStateFor(snapshot({ dimming: 5 })).dim, 10);
+	assert.equal(initialStateFor(snapshot({ dimming: 250 })).dim, 100);
+	assert.equal(initialStateFor(snapshot({ dimming: null })).dim, 60);
+});
+
+test("initialStateFor: a light that was off still starts from its recorded colour and dimming", () => {
+	const state = initialStateFor(snapshot({ state: false, r: 0, g: 255, b: 0, dimming: 70 }));
+	assert.equal(state.hue, 120);
+	assert.equal(state.dim, 70);
+});
+
+test("initialStateFor: nothing at all is the friendly blue at 60%", () => {
+	assert.deepEqual(initialStateFor(undefined), { hue: 210, sat: 85, dim: 60 });
 });

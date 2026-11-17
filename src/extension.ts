@@ -10,15 +10,30 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createWiz, type Light, type Wiz } from "./wiz.ts";
+import { createLiveSender } from "./live.ts";
+import { BarsComponent, hsvToRgb, initialStateFor, piKeys, pickHex, rawKeys, type KeyApi, type PickState } from "./pick.ts";
+import { createWiz, type Light, type Snapshot, type Wiz } from "./wiz.ts";
 import { udpBroadcast, udpSend } from "./transport.ts";
 
 type Level = "info" | "warning" | "error";
 interface UI {
 	notify(message: string, level?: Level): void;
 }
+/** The factory pi hands to `ctx.ui.custom`; `tui` is only used for `requestRender`. */
+type CustomFactory = (
+	tui: { requestRender: () => void },
+	theme: unknown,
+	keybindings: unknown,
+	done: (value: string | undefined) => void,
+) => unknown;
+/** The fixed options `/wiz pick` opens the overlay with. */
+const PICK_UI = {
+	overlay: true,
+	overlayOptions: { anchor: "center" as const, width: 62, maxHeight: 20 },
+	blocked: { kind: "question" as const, message: "Pick a color" },
+};
 interface Ctx {
-	ui: UI;
+	ui: UI & { custom?: (factory: CustomFactory, options?: unknown) => Promise<string | undefined> };
 }
 
 export interface ExtensionOptions {
@@ -35,15 +50,16 @@ export const USAGE = `/wiz — WiZ lights:
   /wiz temp <2200-6500>         white temperature in kelvin, e.g. /wiz temp 3200
   /wiz color <#rgb|#rrggbb>     color, e.g. /wiz color #ffcc00
   /wiz scene <1-32>             play a scene, e.g. /wiz scene 6
+  /wiz pick                     live colour editor for one light: /wiz <light> pick
   /wiz status                   same as /wiz
   /wiz discover                 find lights and print the JSON for lights.json
   /wiz help                     this help
   /wiz <light>                  that light's state, e.g. /wiz escritorio
 temp and color take the light out of its scene.`;
 
-const FORMS = ["on", "off", "dim", "temp", "color", "scene", "status", "discover", "help"] as const;
+const FORMS = ["on", "off", "dim", "temp", "color", "scene", "pick", "status", "discover", "help"] as const;
 /** Forms that make sense for one named light. */
-const NAME_FORMS = ["on", "off", "dim", "temp", "color", "scene", "status"] as const;
+const NAME_FORMS = ["on", "off", "dim", "temp", "color", "scene", "pick", "status"] as const;
 
 const RANGES = { dim: [10, 100], temp: [2200, 6500], scene: [1, 32] } as const;
 const EXAMPLES = { dim: "40", temp: "3200", scene: "6" } as const;
@@ -52,6 +68,7 @@ export type WizAction =
 	| { kind: "status" | "on" | "off"; name?: string }
 	| { kind: "dim" | "temp" | "scene"; value: number; name?: string }
 	| { kind: "color"; value: string; name?: string }
+	| { kind: "pick"; name?: string }
 	| { kind: "discover" | "help" }
 	| { kind: "error"; message: string };
 
@@ -103,6 +120,9 @@ export function parseWiz(args: string, lights: string[]): WizAction {
 				return fail("color must be #rgb or #rrggbb, e.g. /wiz color #ffcc00.");
 			}
 			return { kind: "color", value, name };
+		case "pick":
+			if (value) return fail("pick takes no value; open it with /wiz pick or /wiz <light> pick.");
+			return { kind: "pick", name };
 		case "discover":
 			return name ? fail("discover takes no light name.") : { kind: "discover" };
 		case "help":
@@ -114,6 +134,26 @@ export function parseWiz(args: string, lights: string[]): WizAction {
 
 function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/** What a snapshot held, in words, for the restore-failed message. */
+function describeSnapshot(s: Snapshot): string {
+	const bits = [s.state ? "on" : "off"];
+	if (s.dimming != null) bits.push(`dimming ${s.dimming}%`);
+	if (s.sceneId != null) bits.push(`scene ${s.sceneId}`);
+	if (s.temp != null) bits.push(`${s.temp}K`);
+	const hex = (n: number) => n.toString(16).padStart(2, "0");
+	if (s.r != null && s.g != null && s.b != null) bits.push(`#${hex(s.r)}${hex(s.g)}${hex(s.b)}`);
+	return bits.join(", ");
+}
+
+/** pi-tui inside Gentle Shell; anywhere else (tests, other hosts) the raw keys still work. */
+async function keyMatcher(): Promise<KeyApi> {
+	try {
+		return piKeys(await import("@earendil-works/pi-tui"));
+	} catch {
+		return rawKeys;
+	}
 }
 
 export function defaultConfigDir(): string {
@@ -136,6 +176,58 @@ export function createExtension(options: ExtensionOptions = {}) {
 				return wiz.lights().map((l: Light) => l.name);
 			} catch {
 				return [];
+			}
+		}
+
+		/** The live colour editor: read once, move live (throttled), Enter confirms, Esc restores. */
+		async function pick(name: string | undefined, ui: Ctx["ui"]): Promise<void> {
+			// The only thing sent before the modal opens: one getPilot. If it fails
+			// (or the light cannot be named) nothing else happens and nothing is sent.
+			const snapshot = await wiz.snapshot(name);
+			if (typeof ui.custom !== "function") {
+				ui.notify("This interface has no custom UI, so the colour editor cannot open here.", "error");
+				return;
+			}
+			const initial = initialStateFor(snapshot);
+			const keys = await keyMatcher();
+			const live = createLiveSender<{ rgb: [number, number, number]; dim: number }>({
+				send: async ({ rgb, dim }) => {
+					await wiz.applyColor({ r: rgb[0], g: rgb[1], b: rgb[2] }, dim, snapshot.light.name);
+				},
+			});
+			let last: PickState = { ...initial };
+			const result = await ui.custom(
+				(tui, _theme, _keybindings, done) =>
+					new BarsComponent(tui, done, initial, {
+						onChange: (state) => {
+							last = { ...state };
+							// The pure colour (full value) plus the light's dimming, at most 8 sends/s.
+							live.push({ rgb: hsvToRgb(state.hue, state.sat / 100, 1), dim: state.dim });
+						},
+					}, keys),
+				PICK_UI,
+			);
+			if (result === undefined) {
+				// Esc: drop pending sends (and let an in-flight one settle, so the
+				// restore cannot be overtaken), then put the light back how it was.
+				await live.cancel();
+				try {
+					await wiz.restore(snapshot);
+					ui.notify(`Restored ${snapshot.light.name} to how it was`, "info");
+				} catch (error) {
+					ui.notify(
+						`Could not restore ${snapshot.light.name} (${message(error)}). Put it back by hand: ${describeSnapshot(snapshot)}.`,
+						"error",
+					);
+				}
+				return;
+			}
+			// Enter: wait for the last value to reach the light, then say which colour it is.
+			try {
+				await live.flush();
+				ui.notify(`Color ${pickHex(last)}, dimming ${last.dim}% on ${snapshot.light.name}`, "info");
+			} catch (error) {
+				ui.notify(message(error), "error");
 			}
 		}
 
@@ -189,6 +281,7 @@ export function createExtension(options: ExtensionOptions = {}) {
 				const action = parseWiz(args ?? "", lightNames());
 				try {
 					if (action.kind === "error") ui.notify(action.message, "error");
+					else if (action.kind === "pick") await pick(action.name, ui);
 					else ui.notify(await dispatch(action), "info");
 				} catch (error) {
 					ui.notify(message(error), "error");

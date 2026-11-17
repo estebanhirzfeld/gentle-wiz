@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createExtension, parseWiz, USAGE, type WizAction } from "../src/extension.ts";
-import { WizError, type Light } from "../src/wiz.ts";
+import { WizError, type Light, type Snapshot } from "../src/wiz.ts";
+import { hsvToRgb, pickHex } from "../src/pick.ts";
 
 const LIGHTS: Light[] = [
 	{ name: "escritorio", ip: "192.0.2.26", mac: "aabbccddee01" },
@@ -222,4 +223,274 @@ test("S1: completions offer the fixed forms and the configured light names", () 
 	assert.deepEqual(values("zzz"), []);
 	assert.deepEqual(values("escritorio d"), ["escritorio dim"]);
 	assert.deepEqual(values("escritorio zzz"), []);
+});
+
+// ------------------------------------------------- S9: /wiz pick (live colour editor)
+
+const breathe = () => new Promise((r) => setImmediate(r));
+/** Settles microtasks until `done()` reports true, bounded so a bug cannot hang the suite. */
+async function until(done: () => boolean): Promise<void> {
+	for (let i = 0; i < 50; i++) {
+		if (done()) return;
+		await breathe();
+	}
+	assert.ok(done(), "condition never became true");
+}
+
+const SCENE_SNAPSHOT: Snapshot = {
+	light: LIGHTS[0],
+	state: true,
+	dimming: 100,
+	sceneId: 6,
+	temp: null,
+	r: null,
+	g: null,
+	b: null,
+};
+
+interface PickHarness {
+	readonly calls: string[];
+	readonly notes: Array<[string, Level]>;
+	readonly component: { handleInput(data: string): void; state: { hue: number; sat: number; dim: number }; hex(): string } | null;
+	readonly openOptions: unknown;
+	run(args: string): Promise<void>;
+	readonly runPromise: Promise<void> | undefined;
+	complete(prefix: string): unknown;
+}
+
+/** The pick-specific harness: wraps the original engine fake with snapshot/applyColor/restore and a real custom(). */
+function pickSetup(
+	opts: { snapshot?: Snapshot; customThrows?: boolean; noCustom?: boolean; restoreFails?: boolean; several?: boolean } = {},
+): PickHarness {
+	const calls: string[] = [];
+	const engine = {
+		lights: (): Light[] => {
+			calls.push("lights");
+			return opts.several ? LIGHTS : [LIGHTS[0]];
+		},
+		status: () => "STATUS",
+		on: () => "ON",
+		off: () => "OFF",
+		dim: () => "DIM",
+		temp: () => "TEMP",
+		color: () => "COLOR",
+		scene: () => "SCENE",
+		discover: () => "DISCOVER",
+		snapshot: (name?: string) => {
+			calls.push(`snapshot:${name ?? ""}`);
+			const snap = opts.snapshot ?? SCENE_SNAPSHOT;
+			if (opts.several && name === undefined) {
+				throw new WizError("Several lights are configured (escritorio, cocina). Name one, e.g. /wiz escritorio dim 40.");
+			}
+			return snap;
+		},
+		applyColor: (rgb: { r: number; g: number; b: number }, dimming: number, name?: string) => {
+			calls.push(`applyColor:${rgb.r},${rgb.g},${rgb.b}:${dimming}:${name ?? ""}`);
+			return "APPLIED";
+		},
+		restore: (snap: Snapshot) => {
+			if (opts.restoreFails) throw new WizError(`no answer from ${snap.light.name} (${snap.light.ip})`);
+			calls.push(`restore:${snap.light.name}`);
+			return "RESTORED";
+		},
+	} as never;
+
+	const commands = new Map<
+		string,
+		{ description: string; getArgumentCompletions: (prefix: string) => unknown; handler: (args: string, ctx: unknown) => Promise<void> }
+	>();
+	const pi = { registerCommand: (name: string, options: never) => commands.set(name, options), on: () => {} };
+	createExtension({ wiz: engine })(pi as never);
+
+	const notes: Array<[string, Level]> = [];
+	let component: PickHarness["component"] = null;
+	let openOptions: unknown = null;
+	let lastRun: Promise<void> | undefined;
+	const custom = opts.noCustom
+		? undefined
+		: (factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (v: string | undefined) => void) => unknown, options: unknown) => {
+				if (opts.customThrows) throw new Error("custom ui is not available here");
+				openOptions = options;
+				return new Promise<string | undefined>((resolve) => {
+					component = factory({ requestRender() {} }, {}, {}, resolve) as PickHarness["component"];
+				});
+			};
+	const ctx = { ui: { notify: (m: string, l?: Level) => notes.push([m, l]), custom } };
+	const handler = commands.get("wiz")!.handler;
+
+	return {
+		calls,
+		notes,
+		get component() {
+			return component;
+		},
+		get openOptions() {
+			return openOptions;
+		},
+		get runPromise() {
+			return lastRun;
+		},
+		run: (args: string) => {
+			const p = (async () => {
+				await handler(args, ctx);
+				await breathe();
+			})();
+			lastRun = p;
+			return p;
+		},
+		complete: (prefix: string) => commands.get("wiz")!.getArgumentCompletions(prefix),
+	};
+}
+
+/**
+ * Opens the overlay without closing it. The returned `finish()` resolves when
+ * the test later closes the modal through its keys (Enter/Esc); never calling
+ * it is fine for tests that only look at the opened editor.
+ */
+async function openPick(h: PickHarness, args = "pick"): Promise<() => Promise<void>> {
+	void h.run(args);
+	await until(() => h.component !== null);
+	return () => h.runPromise ?? Promise.resolve();
+}
+
+test("S9: parseWiz accepts pick, alone and after a light name, but takes no value", () => {
+	assert.deepEqual(parseWiz("pick", ["escritorio"]), { kind: "pick", name: undefined });
+	assert.deepEqual(parseWiz("PICK", ["escritorio"]), { kind: "pick", name: undefined });
+	assert.deepEqual(parseWiz("cocina pick", ["escritorio", "cocina"]), { kind: "pick", name: "cocina" });
+	for (const args of ["pick 40", "escritorio pick now"]) {
+		assert.equal(parseWiz(args, ["escritorio"]).kind, "error");
+	}
+});
+
+test("S9: completions offer pick and the usage mentions it", () => {
+	const h = pickSetup();
+	const values = (prefix: string) => (h.complete(prefix) as Array<{ value: string }> | null)?.map((i) => i.value) ?? [];
+	assert.ok(values("").includes("pick"));
+	assert.deepEqual(values("escritorio pic"), ["escritorio pick"]);
+	assert.ok(USAGE.includes("pick"));
+});
+
+test("S9: pick reads the snapshot first and opening the modal sends only getPilot", async () => {
+	const h = pickSetup();
+	await openPick(h);
+	assert.deepEqual(h.calls.filter((c) => c !== "lights"), ["snapshot:"], "nothing beyond the snapshot read");
+	assert.ok(h.component, "the overlay opened");
+});
+
+test("S9: the overlay opens centered, 62 wide, with the blocked question", async () => {
+	const h = pickSetup();
+	await openPick(h);
+	assert.deepEqual(h.openOptions, {
+		overlay: true,
+		overlayOptions: { anchor: "center", width: 62, maxHeight: 20 },
+		blocked: { kind: "question", message: "Pick a color" },
+	});
+});
+
+test("S9: the editor starts from the light's current state (scene 6 at 100% -> dim 100)", async () => {
+	const h = pickSetup();
+	await openPick(h);
+	assert.deepEqual(h.component!.state, { hue: 210, sat: 85, dim: 100 });
+});
+
+test("S9: a change sends applyColor with the pure colour and the light's dimming", async () => {
+	const h = pickSetup();
+	await openPick(h);
+	h.component!.handleInput("\x1b[C"); // hue +10
+	const applied = h.calls.filter((c) => c.startsWith("applyColor:"));
+	assert.equal(applied.length, 1);
+	const expected = hsvToRgb(220, 85 / 100, 1);
+	assert.ok(
+		applied[0].startsWith(`applyColor:${expected[0]},${expected[1]},${expected[2]}:100:`),
+		`pure colour at hue 220 with the light's dimming: ${applied[0]}`,
+	);
+});
+
+test("S9: Enter flushes and notifies the colour and dimming on the light", async () => {
+	const h = pickSetup();
+	const finish = await openPick(h);
+	h.component!.handleInput("\r"); // no changes: nothing pending, so nothing is sent
+	await finish();
+	assert.equal(h.calls.filter((c) => c.startsWith("applyColor:")).length, 0, "opening alone never sent a colour");
+	assert.deepEqual(
+		h.notes.map(([m]) => m),
+		[`Color ${pickHex({ hue: 210, sat: 85, dim: 100 })}, dimming 100% on escritorio`],
+	);
+	assert.ok(h.notes.every(([, l]) => l === "info"));
+});
+
+test("S9: a change then Enter flushes the last value before notifying", async () => {
+	const h = pickSetup();
+	const finish = await openPick(h);
+	h.component!.handleInput("\x1b[C"); // one change: leading send
+	h.component!.handleInput("\r"); // Enter while that send is in flight
+	await finish();
+	assert.deepEqual(h.notes.map(([m]) => m), [`Color ${pickHex({ hue: 220, sat: 85, dim: 100 })}, dimming 100% on escritorio`]);
+	assert.equal(h.calls.filter((c) => c.startsWith("applyColor:")).length, 1, "exactly one live send; the change WAS it");
+});
+
+test("S9: Esc cancels and restores the exact snapshot (scene 6 at 100%)", async () => {
+	const h = pickSetup();
+	const finish = await openPick(h);
+	h.component!.handleInput("\x1b[C"); // one change
+	h.component!.handleInput("\x1b"); // Esc: cancel, then restore
+	await finish();
+	assert.deepEqual(h.calls.filter((c) => c.startsWith("applyColor:")).length, 1, "the live change itself was sent");
+	assert.deepEqual(h.calls.filter((c) => c.startsWith("restore:")), ["restore:escritorio"]);
+	// The restore itself is asserted in wiz.test.ts; here the caller wired it.
+	assert.deepEqual(
+		h.notes.map(([m]) => m),
+		["Restored escritorio to how it was"],
+	);
+	assert.ok(h.notes.every(([, l]) => l === "info"));
+});
+
+test("S9: a light that was off is turned on by the first change and off again by Esc", async () => {
+	const h = pickSetup({ snapshot: { ...SCENE_SNAPSHOT, state: false } });
+	const finish = await openPick(h);
+	assert.deepEqual(h.component!.state, { hue: 210, sat: 85, dim: 100 });
+	h.component!.handleInput("\x1b[C"); // first change: turns the light on
+	await breathe();
+	assert.ok(h.calls.some((c) => c.startsWith("applyColor:")), "the change was applied (the light turned on)");
+	h.component!.handleInput("\x1b");
+	await finish();
+	assert.ok(h.calls.some((c) => c.startsWith("restore:")), "Esc restored");
+	assert.match(h.notes.map(([m]) => m)[0], /Restored escritorio/);
+});
+
+test("S9: several lights and no name is an error with nothing sent and no overlay", async () => {
+	const h = pickSetup({ several: true });
+	await h.run("pick"); // the engine's target() throws before any send
+	assert.equal(h.component, null, "no overlay without a target");
+	assert.deepEqual(
+		h.notes.map(([, l]) => l),
+		["error"],
+	);
+	assert.match(h.notes[0][0], /Several lights are configured \(escritorio, cocina\)/);
+	assert.deepEqual(h.calls.filter((c) => c.startsWith("applyColor:")), []);
+});
+
+test("S9: ctx.ui.custom throwing before opening notifies an error and sends nothing", async () => {
+	const h = pickSetup({ customThrows: true });
+	await h.run("pick");
+	assert.equal(h.notes[0][1], "error");
+	assert.deepEqual(h.calls.filter((c) => c !== "lights" && !c.startsWith("snapshot")), [], "the light was not touched");
+});
+
+test("S9: without ctx.ui.custom at all, an error is notified and nothing is sent", async () => {
+	const h = pickSetup({ noCustom: true });
+	await h.run("pick");
+	assert.equal(h.notes[0][1], "error");
+	assert.deepEqual(h.calls.filter((c) => c !== "lights" && !c.startsWith("snapshot")), []);
+});
+
+test("S9: a failing restore is an error notify that names the light and the snapshot", async () => {
+	const h = pickSetup({ restoreFails: true });
+	const finish = await openPick(h);
+	h.component!.handleInput("\x1b");
+	await finish();
+	const [msg, level] = h.notes[0];
+	assert.equal(level, "error");
+	assert.match(msg, /escritorio/);
+	assert.match(msg, /scene 6/, "says what the snapshot was, so the user can fix it by hand");
 });
