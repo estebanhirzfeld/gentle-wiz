@@ -56,3 +56,8 @@ injected, plus a thin extension.
   Envío al foco con throttle y restauración al cancelar = trabajo del llamador (`/wiz pick`), pendiente.
 
 - [ ] W5a S8 — conectar `/wiz pick`: overlay, envío con throttle (~8/s, solo el último), restaurar escena/al encender.
+- L7 (user, verbatim): "veo que ahora muestra la ultima tecla, pero la flechita como los colores y eso no se mueven" —
+  keys arrived but were not recognised. Evidence: pi-tui's real `matchesKey` treats `\x1bOA`, `\x1b[1;1A` and
+  `\x1b[1;1:1A` as arrows; my raw `\x1b[A` comparison missed them, and Kitty sends key-release events (`:3`) that must not
+  step. Fix: injectable `KeyApi` (`piKeys` adapts Pi's matchesKey; `rawKeys` fallback understands application-mode and
+  Kitty), releases ignored, footer shows `última tecla: <raw> → <name> [matcher]`. 61 tests.

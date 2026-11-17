@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BarsComponent, colorName, hslToRgb, pickHex } from "../src/pick.ts";
+import { BarsComponent, colorName, hslToRgb, pickHex, piKeys } from "../src/pick.ts";
 
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 const make = () => {
@@ -85,4 +85,73 @@ test("hsl to hex", () => {
 	assert.equal(pickHex({ hue: 0, sat: 100, dim: 50 }), hslToRgb(0, 1, 0.5).map(() => "").length ? pickHex({ hue: 0, sat: 100, dim: 50 }) : "");
 	assert.equal(pickHex({ hue: 210, sat: 85, dim: 60 }), "#4299f0");
 	assert.match(pickHex({ hue: 360, sat: 100, dim: 100 }), /^#[0-9a-f]{6}$/);
+});
+
+test("arrows work with key names as well as raw sequences", () => {
+	const { c } = make();
+	c.handleInput("down");
+	assert.equal(c.row, 1, "named key moves the row");
+	c.handleInput("right");
+	assert.equal(c.state.dim, 65);
+	const { c: c2 } = make();
+	c2.handleInput("\x1b[C");
+	assert.equal(c2.state.hue, 220, "raw sequence still works");
+});
+
+test("the last key is shown escaped, and unknown keys repaint without changing state", () => {
+	const { c, rendered } = make();
+	const before = { ...c.state };
+	c.handleInput("\x1b[A");
+	assert.equal(c.lastKey, "\\x1b[A → up");
+	c.handleInput("z");
+	assert.deepEqual(c.state, before, "an unknown key changes nothing");
+	assert.ok(rendered.length >= 2, "but it still asks for a repaint");
+});
+
+test("application-mode and Kitty arrow forms move the bars (the real-terminal bug)", () => {
+	for (const up of ["\x1b[A", "\x1bOA", "\x1b[1;1A", "\x1b[1;1:1A"]) {
+		const { c } = make();
+		c.handleInput(up);
+		assert.equal(c.row, 2, `up as ${JSON.stringify(up)} wraps to the last row`);
+	}
+	for (const right of ["\x1b[C", "\x1bOC", "\x1b[1;1C", "\x1b[1;1:1C"]) {
+		const { c } = make();
+		c.handleInput(right);
+		assert.equal(c.state.hue, 220, `right as ${JSON.stringify(right)} steps the hue`);
+	}
+});
+
+test("key release events change nothing", () => {
+	const { c } = make();
+	c.handleInput("\x1b[1;1:3C");
+	assert.equal(c.state.hue, 210);
+	assert.equal(c.sends, 0);
+});
+
+test("an injected key API (pi's matchesKey) decides what a key is", () => {
+	let out: string | undefined | "unset" = "unset";
+	const keys = { which: (d: string) => (d === "ZZ" ? ("right" as const) : undefined), isRelease: () => false };
+	const c = new BarsComponent({ requestRender() {} }, (v) => (out = v), { hue: 210, sat: 85, dim: 60 }, {}, keys);
+	c.handleInput("ZZ");
+	assert.equal(c.state.hue, 220);
+	c.handleInput("\x1b[A"); // the injected API does not know it: ignored, but shown as unknown
+	assert.equal(c.row, 0);
+	assert.match(c.lastKey, /→ \?$/);
+	assert.equal(out, "unset");
+});
+
+test("the footer shows the last key and what it was understood as", () => {
+	const { c } = make();
+	c.handleInput("\x1bOB");
+	const text = c.render(60).map(plain).join("\n");
+	assert.match(text, /última tecla: \\x1bOB → down/);
+});
+
+test("piKeys adapts matchesKey and shows its label", () => {
+	const Key = { up: "UP", down: "DOWN", left: "LEFT", right: "RIGHT", enter: "ENTER", escape: "ESC" };
+	const matchesKey = (data: string, key: unknown) => data === `<${String(key)}>`;
+	const c = new BarsComponent({ requestRender() {} }, () => {}, { hue: 210, sat: 85, dim: 60 }, {}, piKeys({ matchesKey, Key }));
+	c.handleInput("<RIGHT>");
+	assert.equal(c.state.hue, 220);
+	assert.match(c.render(60).map(plain).join("\n"), /\[pi-tui\]/);
 });

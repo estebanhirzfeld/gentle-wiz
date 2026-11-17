@@ -25,6 +25,53 @@ const BARS: Array<"hue" | "dim" | "sat"> = ["hue", "dim", "sat"];
 const LABEL: Record<"hue" | "dim" | "sat", string> = { hue: "Tono", dim: "Brillo", sat: "Saturación" };
 const PAD = 2;
 const KEYS = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", enter: "\r", esc: "\x1b" } as const;
+export type KeyName = "up" | "down" | "left" | "right" | "enter" | "esc";
+
+/** How the component recognises keys. Pi's own `matchesKey` is injected at runtime; tests use the fallback. */
+export interface KeyApi {
+	/** Which key this input is, or undefined. */
+	which(data: string): KeyName | undefined;
+	/** Key-release events (Kitty protocol) must not move anything. */
+	isRelease?(data: string): boolean;
+	/** Shown in the footer so it is obvious which matcher is active. */
+	label?: string;
+}
+
+const ARROWS: Record<string, KeyName> = { A: "up", B: "down", C: "right", D: "left" };
+const NAMES: Record<string, KeyName> = {
+	up: "up", arrowup: "up", down: "down", arrowdown: "down", right: "right", arrowright: "right",
+	left: "left", arrowleft: "left", enter: "enter", return: "enter", escape: "esc", esc: "esc",
+};
+
+/** Fallback for tests: plain, application-mode and Kitty arrow forms, plus key names. */
+export const rawKeys: KeyApi = {
+	which(data) {
+		if (data === "\r" || data === "\n") return "enter";
+		if (data === "\x1b") return "esc";
+		const m = /^\x1b(?:\[(?:1;\d+(?::\d+)?)?|O)([ABCD])$/.exec(data);
+		if (m) return ARROWS[m[1]];
+		return NAMES[data.trim().toLowerCase()];
+	},
+	isRelease: (data) => /^\x1b\[1;\d+:3[ABCD]$/.test(data),
+	label: "crudas",
+};
+
+/** Adapts pi-tui's `matchesKey`/`Key`/`isKeyRelease` (passed in, never imported here) to a KeyApi. */
+export function piKeys(tui: {
+	matchesKey: (data: string, key: unknown) => boolean;
+	Key: Record<string, unknown>;
+	isKeyRelease?: (data: string) => boolean;
+}): KeyApi {
+	const table: Array<[KeyName, unknown]> = [
+		["up", tui.Key.up], ["down", tui.Key.down], ["left", tui.Key.left],
+		["right", tui.Key.right], ["enter", tui.Key.enter], ["esc", tui.Key.escape],
+	];
+	return {
+		which: (data) => table.find(([, key]) => tui.matchesKey(data, key))?.[0],
+		isRelease: tui.isKeyRelease,
+		label: "pi-tui",
+	};
+}
 
 export function hslToRgb(h: number, s: number, l: number): [number, number, number] {
 	const c = (1 - Math.abs(2 * l - 1)) * s;
@@ -71,15 +118,21 @@ export class BarsComponent {
 	row = 0;
 	/** How many changes were reported (the caller throttles the actual sends). */
 	sends = 0;
+	/** Last key received, escaped, so the UI can show what actually arrives. */
+	lastKey = "";
+	private version = 0;
 	private done: (value: string | undefined) => void;
 	private tui: { requestRender: () => void };
 	private hooks: PickHooks;
+	private keys: KeyApi;
 	constructor(
 		tui: { requestRender: () => void },
 		done: (value: string | undefined) => void,
 		initial: PickState,
 		hooks: PickHooks = {},
+		keys: KeyApi = rawKeys,
 	) {
+		this.keys = keys;
 		this.tui = tui;
 		this.done = done;
 		this.state = { ...initial };
@@ -123,23 +176,39 @@ export class BarsComponent {
 
 	handleInput(data: string): void {
 		const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+		if (this.keys.isRelease?.(data)) return; // releasing a key is not another step
+		const key = this.keys.which(data);
+		const shown = data.replace(/\x1b/g, "\\x1b").replace(/\r/g, "\\r");
+		this.lastKey = `${shown} ${key ? `→ ${key}` : "→ ?"}`;
+		if (!key) {
+			this.touch();
+			return;
+		}
 		const active = BARS[this.row];
-		if (data === KEYS.up) this.row = (this.row + BARS.length - 1) % BARS.length;
-		else if (data === KEYS.down) this.row = (this.row + 1) % BARS.length;
-		else if (data === KEYS.enter) return this.done(this.hex());
-		else if (data === KEYS.esc) return this.done(undefined);
-		else if (data === KEYS.right || data === KEYS.left) {
-			const delta = data === KEYS.right ? 1 : -1;
+		if (key === "up") this.row = (this.row + BARS.length - 1) % BARS.length;
+		else if (key === "down") this.row = (this.row + 1) % BARS.length;
+		else if (key === "enter") return this.done(this.hex());
+		else if (key === "esc") return this.done(undefined);
+		else {
+			const delta = key === "right" ? 1 : -1;
 			if (active === "hue") this.state.hue = (((this.state.hue + delta * HUE_STEP) % 360) + 360) % 360;
 			else if (active === "sat") this.state.sat = clamp(this.state.sat + delta * PCT_STEP, 0, 100);
 			else this.state.dim = clamp(this.state.dim + delta * PCT_STEP, MIN_DIM, MAX_DIM);
 			this.sends++;
 			this.hooks.onChange?.({ ...this.state }, this.hex());
-		} else return;
+		}
+		this.touch();
+	}
+
+	private touch(): void {
+		this.version++;
+		this.invalidate();
 		this.tui.requestRender();
 	}
 
-	invalidate(): void {}
+	invalidate(): void {
+		this.version++;
+	}
 
 	render(width: number): string[] {
 		const dim = (t: string) => `\x1b[2m${t}\x1b[22m`;
@@ -168,6 +237,7 @@ export class BarsComponent {
 
 		body.push(blank);
 		body.push(row(`${dim("↑↓")} fila   ${dim("←→")} valor   ${dim("⏎")} aplica   ${dim("esc")} cancela`));
+		body.push(row(`${dim("última tecla:")} ${this.lastKey || dim("—")}  ${dim(`[${this.keys.label ?? "?"}]`)}`));
 		body.push(blank);
 
 		return [`┌${"─".repeat(inner)}┐`, ...body, `└${"─".repeat(inner)}┘`];
