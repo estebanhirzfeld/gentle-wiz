@@ -55,7 +55,6 @@ injected, plus a thin extension.
 - **S8**: `src/pick.ts` — componente puro: calcula y dibuja, reporta cada cambio por `onChange`; sin red ni timers.
   Envío al foco con throttle y restauración al cancelar = trabajo del llamador (`/wiz pick`), pendiente.
 
-- [ ] W5a S8 — conectar `/wiz pick`: overlay, envío con throttle (~8/s, solo el último), restaurar escena/al encender.
 - L7 (user, verbatim): "veo que ahora muestra la ultima tecla, pero la flechita como los colores y eso no se mueven" —
   keys arrived but were not recognised. Evidence: pi-tui's real `matchesKey` treats `\x1bOA`, `\x1b[1;1A` and
   `\x1b[1;1:1A` as arrows; my raw `\x1b[A` comparison missed them, and Kitty sends key-release events (`:3`) that must not
@@ -70,3 +69,12 @@ injected, plus a thin extension.
   (tone + saturation); Brillo is the light's `dimming` (10-100), sent separately. The Brillo bar runs from dark to the
   PURE colour (never white), the swatch and hex are the pure colour, `colorName(hue, sat)` no longer depends on brightness.
   68 tests.
+
+- **S9 `/wiz pick` (live).** User: "perfecto" to: real-time while moving, Enter confirms and closes, Esc restores. `/wiz pick`
+  (or `/wiz <name> pick`) opens the bordered overlay from `src/pick.ts`. Every ←/→ change is sent to the light, throttled to
+  at most 8 sends per second, only the LAST value, never two in flight. Enter flushes the pending value, waits for it, then
+  closes with `color #rrggbb, dimming N%`. Esc cancels pending sends and restores what the light had when the modal opened.
+  Brillo is the light's `dimming` (10-100); the colour is the pure colour (see L9). Several lights and no name: error that
+  lists the names (a live picker must not move every light).
+
+- [ ] T5 S9 — `/wiz pick`: snapshot + restore in the engine, throttled live sender, overlay wiring in the extension, README.
