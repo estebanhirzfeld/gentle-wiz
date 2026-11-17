@@ -28,6 +28,17 @@ export interface Pilot {
 	b?: number | null;
 }
 
+export interface Snapshot {
+	light: Light;
+	state: boolean;
+	dimming: number | null;
+	sceneId: number | null;
+	temp: number | null;
+	r: number | null;
+	g: number | null;
+	b: number | null;
+}
+
 export interface BroadcastAnswer {
 	ip: string;
 	reply: object;
@@ -233,6 +244,66 @@ export function createWiz(deps: WizDeps) {
 			const light = target(name);
 			await write(light, { sceneId: value });
 			return describe(light.name, await read(light));
+		},
+
+		/**
+		 * Reads one light (`target` logic: the only configured light, or the named
+		 * one) and returns everything `/wiz pick` needs to start from and to
+		 * restore exactly what the light had.
+		 */
+		async snapshot(name?: string): Promise<Snapshot> {
+			const light = target(name);
+			const pilot = await read(light);
+			return {
+				light,
+				state: pilot.state !== false,
+				dimming: pilot.dimming ?? null,
+				sceneId: pilot.sceneId ?? null,
+				temp: pilot.temp ?? null,
+				r: pilot.r ?? null,
+				g: pilot.g ?? null,
+				b: pilot.b ?? null,
+			};
+		},
+
+		/** One live send from the colour editor: state on, the pure colour and the light's dimming. */
+		async applyColor({ r, g, b }: { r: number; g: number; b: number }, dimming: number, name?: string): Promise<void> {
+			for (const [kind, value] of [
+				["r", r],
+				["g", g],
+				["b", b],
+			] as Array<[string, number]>) {
+				if (!Number.isInteger(value) || value < 0 || value > 255) {
+					throw new WizError(`${kind} must be an integer from 0 to 255.`);
+				}
+			}
+			checkRange("dim", dimming, DIM_MIN, DIM_MAX);
+			const light = target(name);
+			await write(light, { state: true, r, g, b, dimming });
+		},
+
+		/**
+		 * Puts the light back the way a snapshot found it: off stays off; an on
+		 * light gets its dimming back plus, in this priority, its scene, else its
+		 * temperature, else its colour — exactly what the real device keeps.
+		 */
+		async restore(snapshot: Snapshot): Promise<void> {
+			if (!snapshot.state) {
+				await write(snapshot.light, { state: false });
+				return;
+			}
+			const params: Record<string, unknown> = { state: true };
+			if (snapshot.dimming != null) params.dimming = snapshot.dimming;
+			if (snapshot.sceneId != null) {
+				params.sceneId = snapshot.sceneId;
+			} else if (snapshot.temp != null) {
+				params.temp = snapshot.temp;
+			} else if (snapshot.r != null && snapshot.g != null && snapshot.b != null) {
+				params.r = snapshot.r;
+				params.g = snapshot.g;
+				params.b = snapshot.b;
+			}
+			await write(snapshot.light, params);
 		},
 
 		/**

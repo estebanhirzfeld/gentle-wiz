@@ -341,6 +341,141 @@ test("a reply without a pilot result is an error", async () => {
 	await assert.rejects(() => h.wiz.status(), /malformed/);
 });
 
+// ------------------------------------------------- pick: snapshot / applyColor / restore (S9)
+
+const KNOWN: Pilot = { state: true, dimming: 100, sceneId: 6, temp: null, r: null, g: null, b: null };
+
+function snapshotOf(pilot: Partial<Pilot> = {}): import("../src/wiz.ts").Snapshot {
+	return { light: { name: "escritorio", ip: "192.0.2.26", mac: "aabbccddee01" }, ...KNOWN, ...pilot } as import("../src/wiz.ts").Snapshot;
+}
+
+test("snapshot reads the light once and carries light, state, dimming, scene, temp and rgb", async () => {
+	const h = setup();
+	const snap = await h.wiz.snapshot();
+	assert.deepEqual(h.sent, [{ json: { method: "getPilot", params: {} }, ip: "192.0.2.26" }], "exactly one getPilot");
+	assert.deepEqual(snap.light, ESCRITORIO);
+	assert.deepEqual(
+		{ state: snap.state, dimming: snap.dimming, sceneId: snap.sceneId, temp: snap.temp, r: snap.r, g: snap.g, b: snap.b },
+		{ state: true, dimming: 100, sceneId: 6, temp: null, r: null, g: null, b: null },
+	);
+});
+
+test("snapshot of an off light keeps its dimming and scene", async () => {
+	const h = setup({ pilot: { state: false } });
+	const snap = await h.wiz.snapshot();
+	assert.equal(snap.state, false);
+	assert.equal(snap.dimming, 100);
+	assert.equal(snap.sceneId, 6);
+});
+
+test("snapshot works with a name among several lights", async () => {
+	const h = setup({ lights: [ESCRITORIO, COCINA] });
+	const snap = await h.wiz.snapshot("cocina");
+	assert.equal(snap.light.name, "cocina");
+	assert.equal(h.sent[0].ip, "192.0.2.27");
+});
+
+test("snapshot without a name and several lights is the which-light error, and sends nothing", async () => {
+	const h = setup({ lights: [ESCRITORIO, COCINA] });
+	await assert.rejects(
+		() => h.wiz.snapshot(),
+		/Several lights are configured \(escritorio, cocina\)\. Name one/,
+	);
+	assert.equal(h.sent.length, 0);
+});
+
+test("applyColor sends state:true with the pure colour and dimming in one datagram", async () => {
+	const h = setup();
+	await h.wiz.applyColor({ r: 255, g: 136, b: 0 }, 40);
+	assert.deepEqual(h.sent, [
+		{ json: { method: "setPilot", params: { state: true, r: 255, g: 136, b: 0, dimming: 40 } }, ip: "192.0.2.26" },
+	]);
+	assert.equal(h.pilot.r, 255);
+	assert.equal(h.pilot.dimming, 40);
+});
+
+test("applyColor targets the named light among several without touching the others", async () => {
+	const h = setup({ lights: [ESCRITORIO, COCINA] });
+	await h.wiz.applyColor({ r: 0, g: 0, b: 255 }, 20, "cocina");
+	assert.deepEqual(h.sent.map((s) => s.ip), ["192.0.2.27"]);
+});
+
+test("applyColor validates dimming and the rgb bytes before sending anything", async () => {
+	for (const [rgb, dim] of [
+		[{ r: 0, g: 0, b: 300 }, 50],
+		[{ r: -1, g: 0, b: 0 }, 50],
+		[{ r: 1.5, g: 0, b: 0 }, 50],
+		[{ r: 0, g: 0, b: 0 }, 9],
+		[{ r: 0, g: 0, b: 0 }, 101],
+	] as Array<[{ r: number; g: number; b: number }, number]>) {
+		const h = setup();
+		await assert.rejects(() => h.wiz.applyColor(rgb, dim), /must be/);
+		assert.equal(h.sent.length, 0);
+	}
+});
+
+test("applyColor retries lost datagrams and reports no answer naming the light", async () => {
+	const h = setup({ failAll: true });
+	await assert.rejects(
+		() => h.wiz.applyColor({ r: 1, g: 2, b: 3 }, 50),
+		(error: unknown) => {
+			assert.ok(error instanceof WizError);
+			assert.equal(error.message, "no answer from escritorio (192.0.2.26)");
+			return true;
+		},
+	);
+	assert.equal(h.sent.length, 3, "three tries");
+});
+
+test("restore on a scene light sends state, dimming and sceneId exactly (the verified S3 round trip)", async () => {
+	const h = setup();
+	await h.wiz.restore(snapshotOf());
+	assert.deepEqual(h.sent, [
+		{ json: { method: "setPilot", params: { state: true, dimming: 100, sceneId: 6 } }, ip: "192.0.2.26" },
+	]);
+});
+
+test("restore on an off light sends only state:false", async () => {
+	const h = setup({ pilot: { state: false, dimming: 40, r: 255, g: 0, b: 0, sceneId: null } });
+	const snap = await h.wiz.snapshot();
+	assert.equal(snap.state, false);
+	await h.wiz.restore(snap);
+	assert.deepEqual(h.sent[1].json, { method: "setPilot", params: { state: false } });
+});
+
+test("restore prefers temp when there is no scene", async () => {
+	const h = setup({ pilot: { sceneId: null, temp: 3200 } });
+	const snap = await h.wiz.snapshot();
+	await h.wiz.restore(snap);
+	assert.deepEqual(h.sent[1].json, { method: "setPilot", params: { state: true, dimming: 100, temp: 3200 } });
+});
+
+test("restore falls back to rgb when there is no scene and no temp", async () => {
+	const h = setup({ pilot: { sceneId: null, r: 255, g: 8, b: 0 } });
+	const snap = await h.wiz.snapshot();
+	await h.wiz.restore(snap);
+	assert.deepEqual(h.sent[1].json, { method: "setPilot", params: { state: true, dimming: 100, r: 255, g: 8, b: 0 } });
+});
+
+test("restore prefers the scene even when temp and rgb are also present", async () => {
+	const h = setup({ pilot: { temp: 3200, r: 255, g: 8, b: 0 } });
+	const snap = await h.wiz.snapshot();
+	await h.wiz.restore(snap);
+	assert.deepEqual(h.sent[1].json, { method: "setPilot", params: { state: true, dimming: 100, sceneId: 6 } });
+});
+
+test("restore targets the light stored in the snapshot, even with several lights configured", async () => {
+	const h = setup({ lights: [ESCRITORIO, COCINA] });
+	await h.wiz.restore({ ...snapshotOf(), light: COCINA });
+	assert.deepEqual(h.sent.map((s) => s.ip), ["192.0.2.27"]);
+});
+
+test("a restore write is retried and fails with the usual no-answer error", async () => {
+	const h = setup({ lights: [ESCRITORIO, COCINA], failAll: true });
+	await assert.rejects(() => h.wiz.restore({ ...snapshotOf(), light: COCINA }), /no answer from cocina \(192\.0\.2\.27\)/);
+	assert.equal(h.sent.length, 3);
+});
+
 // ------------------------------------------------- discovery
 
 test("discover broadcasts getPilot and prints what answered plus the JSON to paste", async () => {
