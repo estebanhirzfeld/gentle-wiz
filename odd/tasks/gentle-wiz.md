@@ -69,6 +69,12 @@ injected, plus a thin extension.
   (tone + saturation); Brillo is the light's `dimming` (10-100), sent separately. The Brillo bar runs from dark to the
   PURE colour (never white), the swatch and hex are the pure colour, `colorName(hue, sat)` no longer depends on brightness.
   68 tests.
+- L10 (T5 done): engine `snapshot`/`applyColor`/`restore` (`src/wiz.ts`) and the injectable throttled live sender
+  (`src/live.ts`: leading send, trailing last value, never two in flight, flush surfaces a send error once, cancel waits
+  for the in-flight send so a restore cannot be overtaken) landed in `7a139e1`; `/wiz pick` wiring (`src/extension.ts`:
+  fixed form + completions, `initialStateFor` from the snapshot, `ctx.ui.custom` overlay `anchor: center, width 62,
+  maxHeight 20`, blocked "Pick a color", Enter flush + notify, Esc cancel + restore, `initialStateFor` and `rgbToHsv` in
+  `src/pick.ts`) and README in `0b3b352`. 113 tests, all green; the extension still loads under jiti (prints only `wiz`).
 
 - **S9 `/wiz pick` (live).** User: "perfecto" to: real-time while moving, Enter confirms and closes, Esc restores. `/wiz pick`
   (or `/wiz <name> pick`) opens the bordered overlay from `src/pick.ts`. Every ←/→ change is sent to the light, throttled to
@@ -77,4 +83,5 @@ injected, plus a thin extension.
   Brillo is the light's `dimming` (10-100); the colour is the pure colour (see L9). Several lights and no name: error that
   lists the names (a live picker must not move every light).
 
-- [ ] T5 S9 — `/wiz pick`: snapshot + restore in the engine, throttled live sender, overlay wiring in the extension, README.
+- [x] T5 S9 — `/wiz pick`: snapshot + restore in the engine (`7a139e1`), throttled live sender (`7a139e1`),
+  overlay wiring in the extension (`0b3b352`), README (`0b3b352`).
