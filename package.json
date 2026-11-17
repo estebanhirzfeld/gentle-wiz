@@ -4,9 +4,15 @@
   "description": "Control WiZ smart lights from Gentle Shell / Pi with one slash command, over the local network.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/estebanhirzfeld/gentle-wiz.git"
+  },
+  "author": "Esteban Hirzfeld",
+  "homepage": "https://github.com/estebanhirzfeld/gentle-wiz#readme",
   "keywords": ["pi-package", "gentle-shell", "wiz", "lights", "smarthome"],
   "os": ["darwin", "linux"],
-  "files": ["src", "README.md", "LICENSE"],
+  "files": ["src", "README.md", "LICENSE", "assets"],
   "pi": { "extensions": ["./src/extension.ts"] },
   "scripts": { "test": "node --test test/*.test.ts" },
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },

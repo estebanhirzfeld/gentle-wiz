@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="gentle-wiz logo" width="140"></p>
+
 # gentle-wiz
 
 Control WiZ smart lights from Gentle Shell / Pi with one slash command, over the local network:
@@ -10,7 +12,7 @@ background work — no timers, no polling, no sidebar row.
 ## Install
 
 ```
-pi install git:github.com/<owner>/gentle-wiz
+pi install git:github.com/estebanhirzfeld/gentle-wiz
 ```
 
 Restart Gentle Shell and `/wiz` is available. It is never handled by the model: the whole
