@@ -93,3 +93,9 @@ injected, plus a thin extension.
   and the command says `No changes on <light>`; (2) KNOWN LIMIT, not fixed: a light that was OFF when opened is turned off by
   Esc but keeps the previewed colour/dimming (restore of an off light sends only `{state:false}`); needs the real bulb to
   decide the right payload. Two of the worker's tests encoded the old behaviour and were updated, not weakened. 116 tests.
+- L12 (user, verbatim): "la forma de poner los comandos es muy tosca, arreglalo vos". Interpretation (mine, the user left it to me):
+  typing hex, kelvin and scene numbers, English-only verbs. Done inline: colour/white/scene NAMES (`src/names.ts`, scene ids and
+  names from pywizlight's scenes.py, 1-32 only), bare shortcuts (`40`, `40%`, `+10`, `-`, `#hex`), Spanish verbs, `toggle`,
+  menus for a bare `color|dim|temp|scene` through `ctx.ui.select` (colours with swatches), completions that ignore accents.
+  Engine gained `toggle` and `dimBy`. A light named like a colour wins. 138 tests (22 new). Three of the worker's tests encoded
+  the old usage text / "bare dim is an error" and were updated, not weakened. Unverified: how the menus look in the user's terminal.

@@ -96,8 +96,7 @@ test("S1: parseWiz targets a named light, with a bare name showing its state", (
 
 test("S1: parseWiz rejects unknown forms and malformed values, naming the valid range", () => {
 	for (const [args, pattern] of [
-		["bogus", /\/wiz dim <10-100>/],
-		["dim", /whole number|needs a number/],
+		["bogus", /\/wiz 40/],
 		["dim abc", /whole number|needs a number/],
 		["dim 9", /10 to 100/],
 		["dim 101", /10 to 100/],
@@ -105,9 +104,9 @@ test("S1: parseWiz rejects unknown forms and malformed values, naming the valid 
 		["temp 6501", /2200 to 6500/],
 		["scene 0", /1 to 32/],
 		["scene 33", /1 to 32/],
-		["color ff8800", /#rgb or #rrggbb/],
-		["color #12345", /#rgb or #rrggbb/],
-		["nope dim 40", /\/wiz dim <10-100>/],
+		["color ff8800", /#rgb, #rrggbb or a name/],
+		["color #12345", /#rgb, #rrggbb or a name/],
+		["nope dim 40", /\/wiz 40/],
 		["escritorio bogus", /\/wiz <light>/],
 		["escritorio discover", /takes no light name/],
 	] as Array<[string, RegExp]>) {
@@ -121,7 +120,7 @@ test("S1: every parseWiz error shows the usage", () => {
 	const action = parseWiz("bogus", []);
 	assert.ok(action.kind === "error");
 	assert.ok(action.message.includes("/wiz discover"));
-	assert.ok(action.message.includes("/wiz dim <10-100>"));
+	assert.ok(action.message.includes("/wiz 40"), "the brightness shortcut is in the usage");
 });
 
 // ------------------------------------------------- handler dispatch
@@ -221,7 +220,8 @@ test("S1: completions offer the fixed forms and the configured light names", () 
 	assert.deepEqual(values("dim"), ["dim"]);
 	assert.deepEqual(values("ESC"), ["escritorio"]);
 	assert.deepEqual(values("zzz"), []);
-	assert.deepEqual(values("escritorio d"), ["escritorio dim"]);
+	assert.ok(values("escritorio d").includes("escritorio dim"));
+	assert.ok(values("escritorio d").every((v) => v.startsWith("escritorio d")), "only things that start with d");
 	assert.deepEqual(values("escritorio zzz"), []);
 });
 

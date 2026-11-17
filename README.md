@@ -27,28 +27,43 @@ build it: run `/wiz discover`, then paste the printed JSON and edit the names.
 
 ## Usage
 
+Say what you want; you rarely need numbers or hex:
+
 ```
-/wiz                          status of every light
-/wiz on | /wiz off            all lights, or one: /wiz escritorio on
-/wiz dim <10-100>             brightness, e.g. /wiz dim 40
-/wiz temp <2200-6500>         white temperature in kelvin, e.g. /wiz temp 3200
-/wiz color <#rgb|#rrggbb>     color, e.g. /wiz color #ffcc00
-/wiz scene <1-32>             play a scene, e.g. /wiz scene 6
-/wiz pick                     live colour editor (see below), e.g. /wiz pick or /wiz escritorio pick
-/wiz status                   same as /wiz
-/wiz discover                 find lights and print the JSON for lights.json
-/wiz help                     this help
-/wiz <light>                  that light's state, e.g. /wiz escritorio
-/wiz <light> <form>           target one light, e.g. /wiz escritorio dim 40
+/wiz                    state of every light
+/wiz on | off | toggle  switch (Spanish too: prender, apagar, alternar)
+/wiz 40                 brightness 10-100 (also 40%, +10, -10, brillo 40)
+/wiz azul               a colour by name
+/wiz calido             a white by name
+/wiz cozy               a scene by name
+/wiz color              ...or open a menu: /wiz color, /wiz dim, /wiz temp, /wiz scene
+/wiz pick               live colour editor (see below)
+/wiz escritorio azul    target one light: /wiz <light> <anything above>
 ```
 
-Forms are case-insensitive and ignore extra spaces. With a single configured light the name
-is optional; with several, `/wiz on` and `/wiz off` hit every light and the other forms ask
-you to name one. Every result reports the state read back from the light, e.g.
-`▶ escritorio on, 40%`.
+| You type | You get |
+| --- | --- |
+| `azul`, `rojo`, `naranja`, `amarillo`, `verde`, `turquesa`, `celeste`, `violeta`, `rosa`, `magenta` | that colour (English names work too: `blue`, `red`, `teal`, `sky blue`, ...) |
+| `#ffcc00`, `#fc0` | any exact colour |
+| `vela`, `calido`, `neutro`, `frio` (`blanco`) | 2200 / 2700 / 4000 / 6500 K (also `temp 3200`) |
+| `cozy`, `ocean`, `sunset`, `party`, `fireplace`, ... | the WiZ scenes 1-32 by name, as the WiZ app names them (some in Spanish: `acogedor`, `atardecer`, `fiesta`, `chimenea`) |
+| `+10`, `-10`, `+`, `-` | brightness relative to now, clamped to 10-100 |
+| `color`, `dim`, `temp`, `scene` alone | a menu to pick from (colours show a swatch) |
+| `toggle` | all lights off if any is on, otherwise all on |
+
+Everything is matched exactly after ignoring case, accents and extra spaces, so the same text always
+does the same thing. A light named like a colour wins over the colour (`/wiz azul` shows the light
+called `azul`; `/wiz azul azul` paints it blue). Type `/wiz ` and press Tab to see the options.
+
+With a single configured light the name is optional; with several, `on`, `off` and `toggle` hit every
+light and the other forms ask you to name one. Every result reports the state read back from the light,
+e.g. `▶ escritorio on, 40%`.
 
 **Note:** `temp` and `color` take the light out of its scene — the command tells you, e.g.
-`... (left scene 6)`. Changing `dimming` keeps the scene.
+`... (left scene 6)`. Changing `dimming` keeps the scene. Scene ids and names are the ones published
+by pywizlight; scenes above 32 are not offered yet.
+
+`/wiz discover` finds lights and prints the JSON for `lights.json`; `/wiz help` prints this list.
 
 ## Live colour editor (`/wiz pick`)
 

@@ -310,6 +310,26 @@ export function createWiz(deps: WizDeps) {
 		 * Broadcasts getPilot to the network and prints what answered, plus the
 		 * JSON to paste into lights.json. Never writes the config itself.
 		 */
+		/** Brightness relative to now: +/- delta, clamped to 10-100. Like `dim`, it turns the light on. */
+		async dimBy(delta: number, name?: string): Promise<string> {
+			if (!Number.isInteger(delta)) throw new WizError("The brightness change must be a whole number.");
+			const lines: string[] = [];
+			for (const light of targets(name)) {
+				const current = (await read(light)).dimming ?? DIM_MAX;
+				const next = Math.max(DIM_MIN, Math.min(DIM_MAX, current + delta));
+				await write(light, { state: true, dimming: next });
+				lines.push(describe(light.name, await read(light)));
+			}
+			return lines.join("\n");
+		},
+
+		/** Flips the lights: if any of them is on they all go off, otherwise they all go on. */
+		async toggle(name?: string): Promise<string> {
+			let anyOn = false;
+			for (const light of targets(name)) if ((await read(light)).state !== false) anyOn = true;
+			return setAll(!anyOn, name);
+		},
+
 		async discover(): Promise<string> {
 			const answers = await deps.broadcast({ method: "getPilot", params: {} });
 			const seen = new Map<string, string>();
